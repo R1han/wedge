@@ -219,9 +219,19 @@ struct ArchiveConverterTests {
         let root = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }
         let src = try makeFixture(in: root)
-        let converter = ArchiveConverter(timeout: .nanoseconds(1))
-        _ = try? await converter.convert(
-            ConversionRequest(input: src, target: zip, outputDirectory: root), progress: { _ in })
+        let converter = ArchiveConverter(runner: TimingOutRunner())
+        await #expect(throws: WedgeError.toolFailed(tool: "ditto", code: -1, message: "timeout")) {
+            _ = try await converter.convert(
+                ConversionRequest(input: src, target: zip, outputDirectory: root), progress: { _ in })
+        }
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("src.zip").path))
+    }
+}
+
+/// Writes a partial file at the destination (the last argument), then fails as a timeout would.
+private struct TimingOutRunner: ProcessRunning {
+    func run(_ executable: URL, _ args: [String], timeout: Duration) async throws -> ProcessRunner.Output {
+        if let dest = args.last { try Data("partial".utf8).write(to: URL(fileURLWithPath: dest)) }
+        throw WedgeError.toolFailed(tool: "ditto", code: -1, message: "timeout")
     }
 }

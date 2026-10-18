@@ -1,8 +1,13 @@
 import Foundation
 
+/// Seam over process execution so callers can be tested without real child processes.
+public protocol ProcessRunning: Sendable {
+    func run(_ executable: URL, _ args: [String], timeout: Duration) async throws -> ProcessRunner.Output
+}
+
 /// Runs an external tool from an argument array (never a shell string), capturing
 /// stdout and stderr and enforcing a timeout.
-public struct ProcessRunner: Sendable {
+public struct ProcessRunner: ProcessRunning {
     public struct Output: Sendable {
         public let stdout: Data
         public let stderr: Data

@@ -12,6 +12,7 @@ public struct ArchiveConverter: Converter {
     public let id = "archive.systool"
     public let maxEntries: Int
     public let maxBytes: Int64
+    public let timeout: Duration
 
     private let runner = ProcessRunner()
     private let ditto = URL(fileURLWithPath: "/usr/bin/ditto")
@@ -19,9 +20,11 @@ public struct ArchiveConverter: Converter {
     private let unzip = URL(fileURLWithPath: "/usr/bin/unzip")
 
     public init(maxEntries: Int = ArchiveConverter.defaultMaxEntries,
-                maxBytes: Int64 = ArchiveConverter.defaultMaxBytes) {
+                maxBytes: Int64 = ArchiveConverter.defaultMaxBytes,
+                timeout: Duration = .seconds(3600)) {
         self.maxEntries = maxEntries
         self.maxBytes = maxBytes
+        self.timeout = timeout
     }
 
     public func supports(from: FileFormat, to: FileFormat) -> Bool {
@@ -57,17 +60,26 @@ public struct ArchiveConverter: Converter {
             forInput: request.input, target: request.target,
             in: request.outputDirectory, force: request.options.force)
         let input = request.input
+        let isZip = request.target.id == "zip"
         let output: ProcessRunner.Output
-        if request.target.id == "zip" {
-            output = try await runner.run(
-                ditto, ["-c", "-k", "--sequesterRsrc", "--keepParent", input.path, dest.path])
-        } else {
-            output = try await runner.run(
-                tarTool, ["-cf", dest.path, "-C", input.deletingLastPathComponent().path, input.lastPathComponent])
+        do {
+            if isZip {
+                output = try await runner.run(
+                    ditto, ["-c", "-k", "--sequesterRsrc", "--keepParent", "--", input.path, dest.path],
+                    timeout: timeout)
+            } else {
+                output = try await runner.run(
+                    tarTool,
+                    ["-cf", dest.path, "-C", input.deletingLastPathComponent().path, "--", input.lastPathComponent],
+                    timeout: timeout)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: dest)
+            throw error
         }
         guard output.code == 0 else {
             try? FileManager.default.removeItem(at: dest)
-            throw toolFailure(request.target.id == "zip" ? "ditto" : "tar", output)
+            throw toolFailure(isZip ? "ditto" : "tar", output)
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
         return ConversionResult(outputs: [dest], bytesWritten: size)
@@ -93,9 +105,15 @@ public struct ArchiveConverter: Converter {
         let existedBefore = fm.fileExists(atPath: dest.path)
         try fm.createDirectory(at: dest, withIntermediateDirectories: true)
 
-        let output = isZip
-            ? try await runner.run(ditto, ["-x", "-k", request.input.path, dest.path])
-            : try await runner.run(tarTool, ["-xf", request.input.path, "-C", dest.path])
+        let output: ProcessRunner.Output
+        do {
+            output = isZip
+                ? try await runner.run(ditto, ["-x", "-k", "--", request.input.path, dest.path], timeout: timeout)
+                : try await runner.run(tarTool, ["-xf", request.input.path, "-C", dest.path], timeout: timeout)
+        } catch {
+            if !existedBefore { try? fm.removeItem(at: dest) }
+            throw error
+        }
         guard output.code == 0 else {
             if !existedBefore { try? fm.removeItem(at: dest) }
             throw toolFailure(isZip ? "ditto" : "tar", output)
@@ -106,11 +124,11 @@ public struct ArchiveConverter: Converter {
     /// Lists the archive and throws `resourceLimitExceeded` before anything is extracted.
     private func enforceLimits(archive: URL, isZip: Bool) async throws {
         let listing = isZip
-            ? try await runner.run(unzip, ["-l", archive.path])
-            : try await runner.run(tarTool, ["-tvf", archive.path])
+            ? try await runner.run(unzip, ["-l", "--", archive.path], timeout: timeout)
+            : try await runner.run(tarTool, ["-tvf", archive.path], timeout: timeout)
         guard listing.code == 0 else { throw toolFailure(isZip ? "unzip" : "tar", listing) }
         let text = String(decoding: listing.stdout, as: UTF8.self)
-        let (count, bytes) = isZip ? Self.parseZipListing(text) : Self.parseTarListing(text)
+        let (count, bytes) = isZip ? try Self.parseZipListing(text) : try Self.parseTarListing(text)
         if count > maxEntries {
             throw WedgeError.resourceLimitExceeded("archive has \(count) entries (limit \(maxEntries))")
         }
@@ -120,7 +138,7 @@ public struct ArchiveConverter: Converter {
     }
 
     /// `unzip -l`: rows sit between two dashed separator lines; the first column is the length.
-    static func parseZipListing(_ text: String) -> (count: Int, bytes: Int64) {
+    static func parseZipListing(_ text: String) throws -> (count: Int, bytes: Int64) {
         var count = 0
         var bytes: Int64 = 0
         var separators = 0
@@ -131,26 +149,40 @@ public struct ArchiveConverter: Converter {
                 continue
             }
             guard separators == 1 else { continue }
-            guard let first = trimmed.split(separator: " ").first, let size = Int64(first) else { continue }
+            guard let first = trimmed.split(separator: " ").first, let size = Int64(first) else {
+                throw unreadableListing(trimmed)
+            }
             count += 1
-            bytes += size
+            bytes = try add(bytes, size)
         }
         return (count, bytes)
     }
 
     /// `tar -tvf` (bsdtar): `perms links owner group size date... name`; size is the fifth field.
-    static func parseTarListing(_ text: String) -> (count: Int, bytes: Int64) {
+    static func parseTarListing(_ text: String) throws -> (count: Int, bytes: Int64) {
         var count = 0
         var bytes: Int64 = 0
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             count += 1
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-            if fields.count > 4, let size = Int64(fields[4]) { bytes += size }
+            guard fields.count > 4, let size = Int64(fields[4]) else { throw unreadableListing(String(line)) }
+            bytes = try add(bytes, size)
         }
         return (count, bytes)
     }
 
     // MARK: - Helpers
+
+    /// Fail-safe: a size that cannot be read or summed is treated as exceeding the limit.
+    private static func unreadableListing(_ line: String) -> WedgeError {
+        .resourceLimitExceeded("archive listing has an unreadable entry size: \(line)")
+    }
+
+    private static func add(_ total: Int64, _ size: Int64) throws -> Int64 {
+        let (sum, overflow) = total.addingReportingOverflow(size)
+        if overflow || size < 0 { throw WedgeError.resourceLimitExceeded("archive entry sizes overflow") }
+        return sum
+    }
 
     private func toolFailure(_ tool: String, _ output: ProcessRunner.Output) -> WedgeError {
         .toolFailed(

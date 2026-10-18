@@ -39,6 +39,7 @@ public enum WedgeCLI {
             let command = try RootCommand.parseAsRoot(args)
             if let convert = command as? ConvertCommand { return await convert.execute(output: output) }
             if let list = command as? ListCommand { return list.execute(output: output) }
+            if let doctor = command as? DoctorCommand { return doctor.execute(output: output) }
             if var async = command as? AsyncParsableCommand { try await async.run() }
             return 0
         } catch {
@@ -60,6 +61,7 @@ public enum WedgeCLI {
         case .outputExists(let url): return "error: output already exists: \(url.path) (use --force to overwrite)"
         case .resourceLimitExceeded(let detail): return "error: resource limit exceeded: \(detail)"
         case .toolFailed(let tool, let code, let message): return "error: \(tool) failed (exit \(code)): \(message)"
+        case .toolNotInstalled(let tool, let hint): return "error: \(tool) is not installed (\(hint))"
         case .cancelled: return "error: cancelled"
         case .invalidInput(let detail): return "error: invalid input: \(detail)"
         }
@@ -74,6 +76,7 @@ public enum WedgeCLI {
         case .outputExists: return 73
         case .resourceLimitExceeded: return 69
         case .toolFailed: return 70
+        case .toolNotInstalled: return 69
         case .cancelled: return 130
         case .invalidInput: return 65
         }

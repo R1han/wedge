@@ -14,5 +14,7 @@ jobs:
         run: swift --version
       - name: Build
         run: swift build
+      - name: Install converter tools
+        run: brew install pandoc ffmpeg
       - name: Test
         run: swift test

@@ -89,6 +89,56 @@ struct ConversionServiceTests {
         #expect(result.outputs[0].pathExtension == "jpg")
     }
 
+    @Test func convertDirectoryToZipCreatesArchive() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("folder", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "hi".write(to: folder.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let out = dir.appendingPathComponent("out", isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let zip = FileFormat.format(forExtension: "zip")!
+        let service = ConversionService(registry: Wedge.defaultRegistry())
+        let result = try await service.convert(ConversionRequest(input: folder, target: zip, outputDirectory: out))
+        let archive = try #require(result.outputs.first)
+        #expect(archive.pathExtension == "zip")
+        #expect(FileManager.default.fileExists(atPath: archive.path))
+        #expect(result.bytesWritten > 0)
+
+        let back = dir.appendingPathComponent("back", isDirectory: true)
+        try FileManager.default.createDirectory(at: back, withIntermediateDirectories: true)
+        let extracted = try await service.convert(
+            ConversionRequest(input: archive, target: ArchiveConverter.directoryFormat, outputDirectory: back))
+        let dest = try #require(extracted.outputs.first)
+        let found = FileManager.default.enumerator(atPath: dest.path)?
+            .compactMap { $0 as? String }.filter { $0.hasSuffix("a.txt") } ?? []
+        #expect(found.count == 1)
+    }
+
+    @Test func convertUnknownExtensionFileToTarSucceeds() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = dir.appendingPathComponent("notes.xyz")
+        try "text".write(to: input, atomically: true, encoding: .utf8)
+        let tar = FileFormat.format(forExtension: "tar")!
+        let result = try await ConversionService(registry: Wedge.defaultRegistry())
+            .convert(ConversionRequest(input: input, target: tar))
+        let archive = try #require(result.outputs.first)
+        #expect(archive.pathExtension == "tar")
+        #expect(FileManager.default.fileExists(atPath: archive.path))
+    }
+
+    @Test func convertUnknownExtensionToUnsupportedTargetThrows() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = dir.appendingPathComponent("notes.xyz")
+        try "text".write(to: input, atomically: true, encoding: .utf8)
+        await #expect(throws: WedgeError.unsupportedConversion(from: "xyz", to: "jpeg")) {
+            _ = try await ConversionService(registry: Wedge.defaultRegistry())
+                .convert(ConversionRequest(input: input, target: jpeg))
+        }
+    }
+
     @Test func defaultRegistryExposesArchiveExtraction() {
         let registry = Wedge.defaultRegistry()
         let zip = FileFormat.format(forExtension: "zip")!

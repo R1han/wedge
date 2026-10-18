@@ -25,13 +25,23 @@ public final class ConversionService: Sendable {
         guard FileManager.default.fileExists(atPath: request.input.path) else {
             throw WedgeError.inputNotFound(request.input)
         }
-        let from = FileFormat.format(forExtension: request.input.pathExtension)
-        guard let from, let converter = registry.converter(from: from, to: request.target) else {
-            throw WedgeError.unsupportedConversion(
-                from: from?.id ?? request.input.pathExtension.lowercased(),
-                to: request.target.id)
+        let from = Self.sourceFormat(for: request.input)
+        guard let converter = registry.converter(from: from, to: request.target) else {
+            throw WedgeError.unsupportedConversion(from: from.id, to: request.target.id)
         }
         return try await converter.convert(request, progress: progress)
+    }
+
+    /// Resolves the input's format. Directories and files with an unrecognised extension get a
+    /// synthesized `.other` format so the registry (not this lookup) decides whether they convert.
+    private static func sourceFormat(for input: URL) -> FileFormat {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: input.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return ArchiveConverter.folderFormat
+        }
+        let ext = input.pathExtension.lowercased()
+        return FileFormat.format(forExtension: ext)
+            ?? FileFormat(id: ext, extensions: ext.isEmpty ? [] : [ext], category: .other)
     }
 
     /// Converts every request, at most `maxConcurrent` at a time. Results are returned in

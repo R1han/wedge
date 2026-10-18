@@ -121,6 +121,33 @@ import UniformTypeIdentifiers
         #expect(text == "hello")
     }
 
+    @Test func convertFolderToZipCreatesArchive() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("docs")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "x".write(to: folder.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let out = dir.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", folder.path, "--to", "zip", "--out", out.path], output: sink)
+        #expect(code == 0, "stderr: \(sink.stderr)")
+        #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("docs.zip").path))
+    }
+
+    @Test func convertPlainFileToTarCreatesArchive() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("notes.txt")
+        try "x".write(to: file, atomically: true, encoding: .utf8)
+        let out = dir.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", file.path, "--to", "tar", "--out", out.path], output: sink)
+        #expect(code == 0, "stderr: \(sink.stderr)")
+        #expect(FileManager.default.fileExists(atPath: out.appendingPathComponent("notes.tar").path))
+    }
+
     @Test func convertMaxDimDownscales() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

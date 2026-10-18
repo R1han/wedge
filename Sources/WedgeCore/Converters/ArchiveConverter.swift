@@ -9,19 +9,24 @@ public struct ArchiveConverter: Converter {
     /// Pseudo-format used as the `target` of an extraction (the result is a directory).
     public static let directoryFormat = FileFormat(id: "dir", extensions: [], category: .other)
 
+    /// Source format used for a directory input (the result is an archive of it).
+    public static let folderFormat = FileFormat(id: "folder", extensions: [], category: .other)
+
     public let id = "archive.systool"
     public let maxEntries: Int
     public let maxBytes: Int64
     public let timeout: Duration
 
-    private let runner = ProcessRunner()
+    private let runner: any ProcessRunning
     private let ditto = URL(fileURLWithPath: "/usr/bin/ditto")
     private let tarTool = URL(fileURLWithPath: "/usr/bin/tar")
     private let unzip = URL(fileURLWithPath: "/usr/bin/unzip")
 
     public init(maxEntries: Int = ArchiveConverter.defaultMaxEntries,
                 maxBytes: Int64 = ArchiveConverter.defaultMaxBytes,
-                timeout: Duration = .seconds(3600)) {
+                timeout: Duration = .seconds(3600),
+                runner: any ProcessRunning = ProcessRunner()) {
+        self.runner = runner
         self.maxEntries = maxEntries
         self.maxBytes = maxBytes
         self.timeout = timeout
@@ -40,8 +45,12 @@ public struct ArchiveConverter: Converter {
         guard fm.fileExists(atPath: request.input.path) else {
             throw WedgeError.inputNotFound(request.input)
         }
-        let from = FileFormat.format(forExtension: request.input.pathExtension)
-            ?? FileFormat(id: "unknown", extensions: [], category: .other)
+        var isDirectory: ObjCBool = false
+        _ = fm.fileExists(atPath: request.input.path, isDirectory: &isDirectory)
+        let from = isDirectory.boolValue
+            ? Self.folderFormat
+            : FileFormat.format(forExtension: request.input.pathExtension)
+                ?? FileFormat(id: "unknown", extensions: [], category: .other)
         guard supports(from: from, to: request.target) else {
             throw WedgeError.unsupportedConversion(from: from.id, to: request.target.id)
         }

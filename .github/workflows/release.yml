@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write   # create the release and upload the asset in this repo
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal release binary
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Package, verify, checksum
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/wedge"
+          echo "archs:"; lipo -archs "$BIN"
+          lipo -archs "$BIN" | grep -q arm64
+          lipo -archs "$BIN" | grep -q x86_64
+          "$BIN" list >/dev/null
+          mkdir -p dist && cp "$BIN" dist/wedge
+          TARBALL="wedge-${VERSION}-universal-macos.tar.gz"
+          tar -czf "$TARBALL" -C dist wedge
+          SHA256="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
+          {
+            echo "VERSION=$VERSION"
+            echo "TARBALL=$TARBALL"
+            echo "SHA256=$SHA256"
+          } >> "$GITHUB_ENV"
+
+      - name: Create release and upload asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "Wedge $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "$TARBALL" --clobber
+
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "TAP_GITHUB_TOKEN secret not set; skipping tap update." >&2
+            exit 1
+          fi
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/R1han/homebrew-wedge.git" tap
+          cat > tap/Formula/wedge.rb <<RUBY
+          class Wedge < Formula
+            desc "File conversion tool for macOS with image and archive converters"
+            homepage "https://github.com/R1han/wedge"
+            url "https://github.com/R1han/wedge/releases/download/v${VERSION}/wedge-${VERSION}-universal-macos.tar.gz"
+            sha256 "${SHA256}"
+            version "${VERSION}"
+            license "MIT"
+
+            depends_on macos: :ventura
+
+            def install
+              bin.install "wedge"
+            end
+
+            test do
+              assert_match "png -> jpeg", shell_output("#{bin}/wedge list")
+            end
+          end
+          RUBY
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/wedge.rb
+          git commit -m "wedge ${VERSION}"
+          git push

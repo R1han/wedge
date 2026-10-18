@@ -26,9 +26,9 @@ Options for `convert`:
 
 | Option | Meaning |
 | --- | --- |
-| `--to <fmt>` | Target format (required) |
-| `--out <path>` | Output path (defaults to the input name with the new extension) |
-| `--quality <n>` | Output quality for lossy image formats |
+| `--to <fmt>` | Target format (required). Use `--to dir` to extract an archive into a directory |
+| `--out <dir>` | Output directory (defaults to next to the input) |
+| `--quality <n>` | Output quality for lossy image formats, from 0 to 1 |
 | `--max-dim <px>` | Scale images so the longest side is at most this size |
 | `--strip-metadata` | Remove metadata (such as EXIF) from the output |
 | `--force` | Overwrite an existing output file |

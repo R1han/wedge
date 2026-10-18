@@ -56,7 +56,7 @@ jobs:
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/R1han/homebrew-wedge.git" tap
           cat > tap/Formula/wedge.rb <<RUBY
           class Wedge < Formula
-            desc "File conversion tool for macOS with image and archive converters"
+            desc "File conversion tool for macOS: images, documents, audio/video, archives, and PDF"
             homepage "https://github.com/R1han/wedge"
             url "https://github.com/R1han/wedge/releases/download/v${VERSION}/wedge-${VERSION}-universal-macos.tar.gz"
             sha256 "${SHA256}"

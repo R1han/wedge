@@ -39,6 +39,7 @@ public enum WedgeCLI {
             let command = try RootCommand.parseAsRoot(args)
             if let convert = command as? ConvertCommand { return await convert.execute(output: output) }
             if let list = command as? ListCommand { return list.execute(output: output) }
+            if let doctor = command as? DoctorCommand { return doctor.execute(output: output) }
             if var async = command as? AsyncParsableCommand { try await async.run() }
             return 0
         } catch {

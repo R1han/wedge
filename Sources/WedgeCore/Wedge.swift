@@ -6,6 +6,9 @@ public enum Wedge {
         let registry = ConverterRegistry()
         registry.register(ImageConverter())
         registry.register(ArchiveConverter())
+        registry.register(PandocConverter())
+        registry.register(MediaConverter())
+        registry.register(PDFConverter())
         return registry
     }
 }

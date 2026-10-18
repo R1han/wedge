@@ -60,6 +60,7 @@ public struct ProcessRunner: Sendable {
         } onCancel: {
             state.stop(timedOut: false)
         }
+        state.markFinished()
         timer.cancel()
 
         let (outData, errData) = await (stdout, stderr)
@@ -87,17 +88,24 @@ private final class RunState: @unchecked Sendable {
     private let process: Process
     private var _timedOut = false
     private var _cancelled = false
+    private var finished = false
 
     init(_ process: Process) { self.process = process }
 
     var timedOut: Bool { lock.withLock { _timedOut } }
     var cancelled: Bool { lock.withLock { _cancelled } }
 
+    /// Called once the process has exited; any later stop request is ignored so
+    /// normal completion wins over a timeout or cancel that fires at the same moment.
+    func markFinished() { lock.withLock { finished = true } }
+
     func stop(timedOut: Bool) {
-        lock.withLock {
+        let shouldStop: Bool = lock.withLock {
+            if finished { return false }
             if timedOut { _timedOut = true } else { _cancelled = true }
+            return true
         }
-        guard process.isRunning else { return }
+        guard shouldStop, process.isRunning else { return }
         process.terminate()
         let process = self.process
         Task.detached {

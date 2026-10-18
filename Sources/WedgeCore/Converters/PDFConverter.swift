@@ -77,22 +77,33 @@ public struct PDFConverter: Converter {
         let dir = request.outputDirectory ?? request.input.deletingLastPathComponent()
         let stem = request.input.deletingPathExtension().lastPathComponent
         let count = doc.pageCount
-        let destinations = (1...count).map { dir.appendingPathComponent("\(stem)-\($0).png") }
-        // Check every target first so a collision never leaves a partial set of pages behind.
-        if !force, let existing = destinations.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
-            throw WedgeError.outputExists(existing)
-        }
+        let fm = FileManager.default
+        var outputs: [URL] = []
+        var created: [URL] = []
         var total = 0
-        for (index, destination) in destinations.enumerated() {
-            guard let page = doc.page(at: index) else {
-                throw WedgeError.invalidInput("Cannot read page \(index + 1)")
+        do {
+            for index in 0..<count {
+                guard let page = doc.page(at: index) else {
+                    throw WedgeError.invalidInput("Cannot read page \(index + 1)")
+                }
+                // OutputNamer suffixes on collision (or reuses the name under force), like every other converter.
+                let destination = OutputNamer().destination(
+                    forInput: dir.appendingPathComponent("\(stem)-\(index + 1).pdf"),
+                    target: request.target, in: dir, force: force)
+                let existed = fm.fileExists(atPath: destination.path)
+                let data = try Self.renderPNG(page)
+                try ImageConverter.write(data, to: destination, force: force)
+                if !existed { created.append(destination) }
+                outputs.append(destination)
+                total += data.count
+                progress(0.9 * Double(index + 1) / Double(count))
             }
-            let data = try Self.renderPNG(page)
-            try ImageConverter.write(data, to: destination, force: force)
-            total += data.count
-            progress(0.9 * Double(index + 1) / Double(count))
+        } catch {
+            // All-or-nothing: remove pages this run created. Files replaced under force cannot be restored.
+            for url in created { try? fm.removeItem(at: url) }
+            throw error
         }
-        return ConversionResult(outputs: destinations, bytesWritten: total)
+        return ConversionResult(outputs: outputs, bytesWritten: total)
     }
 
     private static func renderPNG(_ page: PDFPage) throws -> Data {
@@ -132,8 +143,15 @@ public struct PDFConverter: Converter {
         else {
             throw WedgeError.invalidInput("Cannot decode image: \(request.input.lastPathComponent)")
         }
-        let size = CGSize(width: cgImage.width, height: cgImage.height)
-        guard let page = PDFPage(image: PlatformImage(cgImage: cgImage, size: size)) else {
+        // The thumbnailer applies the EXIF/TIFF orientation transform; full-size so nothing is downscaled.
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(cgImage.width, cgImage.height),
+        ]
+        let oriented = CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary) ?? cgImage
+        let size = CGSize(width: oriented.width, height: oriented.height)
+        guard let page = PDFPage(image: PlatformImage(cgImage: oriented, size: size)) else {
             throw WedgeError.toolFailed(tool: id, code: 1, message: "Cannot create PDF page")
         }
         let doc = PDFDocument()

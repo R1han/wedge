@@ -74,15 +74,48 @@ struct PDFConverterTests {
         #expect(result.bytesWritten > 0)
     }
 
-    @Test func pdfToPngDoesNotClobberExistingPages() async throws {
+    @Test func pdfToPngRerunSuffixesInsteadOfFailing() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePDF(pages: ["A", "B"], in: dir)
+        let first = try await converter.convert(ConversionRequest(input: input, target: png), progress: { _ in })
+        let second = try await converter.convert(ConversionRequest(input: input, target: png), progress: { _ in })
+        #expect(second.outputs.count == 2)
+        #expect(Set(first.outputs).isDisjoint(with: second.outputs))
+        for url in first.outputs + second.outputs { #expect(FileManager.default.fileExists(atPath: url.path)) }
+    }
+
+    @Test func pdfToPngForceOverwrites() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let input = try makePDF(pages: ["A"], in: dir)
-        try Data("keep".utf8).write(to: dir.appendingPathComponent("doc-1.png"))
-        await #expect(throws: WedgeError.self) {
-            _ = try await converter.convert(ConversionRequest(input: input, target: png), progress: { _ in })
-        }
-        #expect(try Data(contentsOf: dir.appendingPathComponent("doc-1.png")) == Data("keep".utf8))
+        let target = dir.appendingPathComponent("doc-1.png")
+        try Data("old".utf8).write(to: target)
+        var options = ConversionOptions()
+        options.force = true
+        let result = try await converter.convert(
+            ConversionRequest(input: input, target: png, options: options), progress: { _ in })
+        #expect(result.outputs == [target])
+        #expect(try Data(contentsOf: target) != Data("old".utf8))
+    }
+
+    @Test func imageToPdfAppliesOrientation() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let ctx = CGContext(
+            data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        let input = dir.appendingPathComponent("rot.png")
+        let dest = CGImageDestinationCreateWithURL(input as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, ctx.makeImage()!, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(dest))
+        let result = try await converter.convert(ConversionRequest(input: input, target: pdf), progress: { _ in })
+        let outURL = try #require(result.outputs.first)
+        let page = try #require(PDFDocument(url: outURL)?.page(at: 0))
+        let box = page.bounds(for: .mediaBox)
+        #expect(box.height > box.width)
     }
 
     @Test func pdfToTxtContainsKnownText() async throws {

@@ -46,7 +46,7 @@ import UniformTypeIdentifiers
     @Test func convertMissingInputFailsWithMessage() async throws {
         let sink = CLIOutput()
         let code = await WedgeCLI.run(["convert", "/nonexistent/nope.png", "--to", "jpeg"], output: sink)
-        #expect(code != 0)
+        #expect(code == 66)
         #expect(sink.stderr.contains("nope.png"))
         #expect(sink.stderr.lowercased().contains("not found"))
     }
@@ -54,7 +54,7 @@ import UniformTypeIdentifiers
     @Test func convertUnknownTargetFails() async throws {
         let sink = CLIOutput()
         let code = await WedgeCLI.run(["convert", "x.png", "--to", "bogus"], output: sink)
-        #expect(code != 0)
+        #expect(code == 64)
         #expect(sink.stderr.contains("bogus"))
     }
 
@@ -74,7 +74,7 @@ import UniformTypeIdentifiers
     @Test func invalidQualityIsRejected() async throws {
         let sink = CLIOutput()
         let code = await WedgeCLI.run(["convert", "x.png", "--to", "jpeg", "--quality", "2"], output: sink)
-        #expect(code != 0)
+        #expect(code == 64)
         #expect(sink.stderr.contains("quality"))
     }
 
@@ -89,7 +89,61 @@ import UniformTypeIdentifiers
     @Test func unknownCommandFails() async throws {
         let sink = CLIOutput()
         let code = await WedgeCLI.run(["frobnicate"], output: sink)
-        #expect(code != 0)
+        #expect(code == 64)
         #expect(!sink.stderr.isEmpty)
+    }
+
+    @Test func convertToDirExtractsZip() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let src = dir.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+        try "hello".write(to: src.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let zip = dir.appendingPathComponent("bundle.zip")
+        let ditto = Process()
+        ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        ditto.arguments = ["-c", "-k", "--sequesterRsrc", src.path, zip.path]
+        try ditto.run()
+        ditto.waitUntilExit()
+        #expect(ditto.terminationStatus == 0)
+
+        let out = dir.appendingPathComponent("out")
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", zip.path, "--to", "dir", "--out", out.path], output: sink)
+        #expect(code == 0, "stderr: \(sink.stderr)")
+        let reported = sink.stdout.split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
+        let destination = try #require(reported.first)
+        #expect(destination.path.hasPrefix(out.path))
+        let found = FileManager.default.enumerator(atPath: destination.path)?
+            .compactMap { $0 as? String }.filter { $0.hasSuffix("a.txt") } ?? []
+        #expect(found.count == 1)
+        let text = try String(contentsOf: destination.appendingPathComponent(try #require(found.first)), encoding: .utf8)
+        #expect(text == "hello")
+    }
+
+    @Test func convertMaxDimDownscales() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)  // 8x8
+        let out = dir.appendingPathComponent("out")
+        let code = await WedgeCLI.run(
+            ["convert", input.path, "--to", "jpeg", "--out", out.path, "--max-dim", "4"], output: CLIOutput())
+        #expect(code == 0)
+        let file = try #require(try FileManager.default.contentsOfDirectory(atPath: out.path).first)
+        let source = try #require(CGImageSourceCreateWithURL(out.appendingPathComponent(file) as CFURL, nil))
+        let props = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        #expect((props[kCGImagePropertyPixelWidth] as? Int ?? 99) <= 4)
+        #expect((props[kCGImagePropertyPixelHeight] as? Int ?? 99) <= 4)
+    }
+
+    @Test func convertUnsupportedConversionFails() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", input.path, "--to", "zip"], output: sink)
+        #expect(code == 65)
+        #expect(sink.stderr.contains("unsupported conversion"))
+        #expect(sink.stderr.contains("png"))
     }
 }

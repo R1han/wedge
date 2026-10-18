@@ -36,13 +36,10 @@ public enum WedgeCLI {
     /// Parses `args` (without the program name), runs the command and returns the process exit code.
     public static func run(_ args: [String], output: CLIOutput = .standard) async -> Int32 {
         do {
-            var command = try RootCommand.parseAsRoot(args)
+            let command = try RootCommand.parseAsRoot(args)
             if let convert = command as? ConvertCommand { return await convert.execute(output: output) }
             if let list = command as? ListCommand { return list.execute(output: output) }
-            if var async = command as? AsyncParsableCommand {
-                try await async.run()
-                command = async
-            }
+            if var async = command as? AsyncParsableCommand { try await async.run() }
             return 0
         } catch {
             let message = RootCommand.message(for: error)
@@ -68,7 +65,7 @@ public enum WedgeCLI {
         }
     }
 
-    /// Exit code per error kind (1 is reserved for usage errors from the parser's own path).
+    /// Exit code per error kind (usage errors raised by the parser exit 64).
     static func exitCode(for error: Error) -> Int32 {
         guard let error = error as? WedgeError else { return 1 }
         switch error {

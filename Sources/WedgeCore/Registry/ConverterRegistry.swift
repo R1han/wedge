@@ -17,13 +17,16 @@ public final class ConverterRegistry: @unchecked Sendable {
         snapshot().first { $0.supports(from: from, to: to) }
     }
 
-    /// Supported (from, to) pairs across registered converters and `FileFormat.known`,
+    /// Supported (from, to) pairs across registered converters, `FileFormat.known` and the
+    /// archive directory pseudo-format (as a target),
     /// deduplicated and sorted by from.id then to.id.
     public func pairs() -> [(from: FileFormat, to: FileFormat)] {
         let current = snapshot()
         var result: [(from: FileFormat, to: FileFormat)] = []
+        // Extraction targets the directory pseudo-format, which is not a known file format.
+        let targets = FileFormat.known + [ArchiveConverter.directoryFormat]
         for from in FileFormat.known {
-            for to in FileFormat.known where from != to {
+            for to in targets where from != to {
                 if current.contains(where: { $0.supports(from: from, to: to) }) {
                     result.append((from: from, to: to))
                 }

@@ -141,7 +141,7 @@ import UniformTypeIdentifiers
         defer { try? FileManager.default.removeItem(at: dir) }
         let input = try makePNG(in: dir)
         let sink = CLIOutput()
-        let code = await WedgeCLI.run(["convert", input.path, "--to", "zip"], output: sink)
+        let code = await WedgeCLI.run(["convert", input.path, "--to", "pdf"], output: sink)
         #expect(code == 65)
         #expect(sink.stderr.contains("unsupported conversion"))
         #expect(sink.stderr.contains("png"))

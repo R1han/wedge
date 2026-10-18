@@ -1,0 +1,95 @@
+import CoreGraphics
+import Foundation
+import ImageIO
+import Testing
+import UniformTypeIdentifiers
+@testable import WedgeCLI
+
+@Suite struct CLIIntegrationTests {
+    private func makeTempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wedge-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func makePNG(in dir: URL) throws -> URL {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let ctx = try #require(CGContext(
+            data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        let image = try #require(ctx.makeImage())
+        let url = dir.appendingPathComponent("src.png")
+        let dest = try #require(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, image, nil)
+        #expect(CGImageDestinationFinalize(dest))
+        return url
+    }
+
+    @Test func convertPngToJpegCreatesOutput() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)
+        let out = dir.appendingPathComponent("out")
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(
+            ["convert", input.path, "--to", "jpeg", "--out", out.path, "--quality", "0.8"], output: sink)
+        #expect(code == 0, "stderr: \(sink.stderr)")
+        let files = try FileManager.default.contentsOfDirectory(atPath: out.path)
+        #expect(files.count == 1)
+        #expect(files.first?.hasSuffix(".jpg") == true || files.first?.hasSuffix(".jpeg") == true)
+    }
+
+    @Test func convertMissingInputFailsWithMessage() async throws {
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", "/nonexistent/nope.png", "--to", "jpeg"], output: sink)
+        #expect(code != 0)
+        #expect(sink.stderr.contains("nope.png"))
+        #expect(sink.stderr.lowercased().contains("not found"))
+    }
+
+    @Test func convertUnknownTargetFails() async throws {
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", "x.png", "--to", "bogus"], output: sink)
+        #expect(code != 0)
+        #expect(sink.stderr.contains("bogus"))
+    }
+
+    @Test func convertExistingOutputIsNotClobberedUnlessForced() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)
+        func count() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: dir.path).count }
+        #expect(await WedgeCLI.run(["convert", input.path, "--to", "jpeg"], output: CLIOutput()) == 0)
+        #expect(try count() == 2)
+        #expect(await WedgeCLI.run(["convert", input.path, "--to", "jpeg"], output: CLIOutput()) == 0)
+        #expect(try count() == 3)  // second run got a new name
+        #expect(await WedgeCLI.run(["convert", input.path, "--to", "jpeg", "--force"], output: CLIOutput()) == 0)
+        #expect(try count() == 3)  // forced run overwrote the base name
+    }
+
+    @Test func invalidQualityIsRejected() async throws {
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["convert", "x.png", "--to", "jpeg", "--quality", "2"], output: sink)
+        #expect(code != 0)
+        #expect(sink.stderr.contains("quality"))
+    }
+
+    @Test func listIncludesPngToJpeg() async throws {
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["list"], output: sink)
+        #expect(code == 0)
+        #expect(sink.stdout.contains("png -> jpeg"))
+        #expect(sink.stdout.contains("-> dir"))
+    }
+
+    @Test func unknownCommandFails() async throws {
+        let sink = CLIOutput()
+        let code = await WedgeCLI.run(["frobnicate"], output: sink)
+        #expect(code != 0)
+        #expect(!sink.stderr.isEmpty)
+    }
+}

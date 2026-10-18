@@ -63,6 +63,8 @@ jobs:
             version "${VERSION}"
             license "MIT"
 
+            depends_on "ffmpeg"
+            depends_on "pandoc"
             depends_on macos: :ventura
 
             def install

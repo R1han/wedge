@@ -41,6 +41,7 @@ struct PandocConverterTests {
         let out = try #require(result.outputs.first)
         #expect(out.pathExtension == "html")
         let text = try String(contentsOf: out, encoding: .utf8)
+        #expect(text.contains("<html"))
         #expect(text.contains("<h1"))
         #expect(text.contains("Quarterly Heading"))
         #expect(result.bytesWritten > 0)
@@ -59,6 +60,48 @@ struct PandocConverterTests {
         let size = try FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int ?? 0
         #expect(size > 0)
         #expect(result.bytesWritten == size)
+    }
+
+    @Test(.enabled(if: PandocConverterTests.pandocInstalled))
+    func plainTextToHTMLAndMarkdownSucceed() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = dir.appendingPathComponent("plain.txt")
+        try "Hello plain world\n".write(to: input, atomically: true, encoding: .utf8)
+        for target in [html, md] {
+            let result = try await PandocConverter().convert(
+                ConversionRequest(input: input, target: target, outputDirectory: nil, options: .init()),
+                progress: { _ in })
+            let text = try String(contentsOf: try #require(result.outputs.first), encoding: .utf8)
+            #expect(text.contains("Hello plain world"))
+        }
+    }
+
+    @Test(.enabled(if: PandocConverterTests.pandocInstalled))
+    func markdownToRTFIsWrapped() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makeMarkdown(in: dir)
+        let result = try await PandocConverter().convert(
+            ConversionRequest(input: input, target: FileFormat.format(forExtension: "rtf")!,
+                              outputDirectory: nil, options: .init()),
+            progress: { _ in })
+        let text = try String(contentsOf: try #require(result.outputs.first), encoding: .utf8)
+        #expect(text.hasPrefix("{\\rtf"))
+    }
+
+    @Test func inputPathFollowsDoubleDashSeparator() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makeMarkdown(in: dir)
+        let recorder = RecordingRunner()
+        let converter = PandocConverter(locator: { _ in URL(fileURLWithPath: "/usr/bin/true") }, runner: recorder)
+        _ = try? await converter.convert(
+            ConversionRequest(input: input, target: html, outputDirectory: nil, options: .init()),
+            progress: { _ in })
+        let args = try #require(recorder.lastArgs)
+        #expect(Array(args.suffix(2)) == ["--", input.path])
+        #expect(args.contains("-s"))
     }
 
     @Test func missingInputThrowsInputNotFound() async throws {
@@ -116,5 +159,15 @@ private struct StubRunner: ProcessRunning {
     let stderr: String
     func run(_ executable: URL, _ args: [String], timeout: Duration) async throws -> ProcessRunner.Output {
         ProcessRunner.Output(stdout: Data(), stderr: Data(stderr.utf8), code: code)
+    }
+}
+
+private final class RecordingRunner: ProcessRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var args: [String]?
+    var lastArgs: [String]? { lock.withLock { args } }
+    func run(_ executable: URL, _ args: [String], timeout: Duration) async throws -> ProcessRunner.Output {
+        lock.withLock { self.args = args }
+        return ProcessRunner.Output(stdout: Data(), stderr: Data(), code: 1)
     }
 }

@@ -17,16 +17,24 @@ public struct PandocConverter: Converter {
         self.runner = runner
     }
 
-    /// FileFormat id -> pandoc format name.
-    private static let pandocNames: [String: String] = [
+    /// FileFormat id -> pandoc reader name. pandoc has no plain-text reader, so txt reads as markdown.
+    private static let readerNames: [String: String] = [
+        "md": "markdown", "html": "html", "docx": "docx", "epub": "epub", "txt": "markdown", "rtf": "rtf",
+    ]
+
+    /// FileFormat id -> pandoc writer name.
+    private static let writerNames: [String: String] = [
         "md": "markdown", "html": "html", "docx": "docx", "epub": "epub", "txt": "plain", "rtf": "rtf",
     ]
+
+    /// Targets that need a full document wrapper (html page, `{\rtf1` header).
+    private static let standaloneTargets: Set<String> = ["html", "rtf"]
 
     /// Generous: large documents with embedded media can take a while.
     private static let timeout: Duration = .seconds(600)
 
     public func supports(from: FileFormat, to: FileFormat) -> Bool {
-        from.id != to.id && Self.pandocNames[from.id] != nil && Self.pandocNames[to.id] != nil
+        from.id != to.id && Self.readerNames[from.id] != nil && Self.writerNames[to.id] != nil
     }
 
     public func convert(
@@ -38,11 +46,11 @@ public struct PandocConverter: Converter {
             throw WedgeError.inputNotFound(request.input)
         }
         guard let source = FileFormat.format(forExtension: request.input.pathExtension),
-              let fromName = Self.pandocNames[source.id]
+              let fromName = Self.readerNames[source.id]
         else {
             throw WedgeError.invalidInput("Unsupported document type: \(request.input.lastPathComponent)")
         }
-        guard let toName = Self.pandocNames[request.target.id], source.id != request.target.id else {
+        guard let toName = Self.writerNames[request.target.id], source.id != request.target.id else {
             throw WedgeError.unsupportedConversion(from: source.id, to: request.target.id)
         }
         guard let pandoc = locator("pandoc") else {
@@ -63,10 +71,10 @@ public struct PandocConverter: Converter {
         let tmp = directory.appendingPathComponent(".wedge-\(UUID().uuidString).tmp")
         defer { try? fm.removeItem(at: tmp) }
 
-        let output = try await runner.run(
-            pandoc,
-            [request.input.path, "-f", fromName, "-t", toName, "-o", tmp.path],
-            timeout: Self.timeout)
+        var args = ["-f", fromName, "-t", toName, "-o", tmp.path]
+        if Self.standaloneTargets.contains(request.target.id) { args.append("-s") }
+        args += ["--", request.input.path]
+        let output = try await runner.run(pandoc, args, timeout: Self.timeout)
         progress(0.8)
         guard output.code == 0 else {
             let message = String(decoding: output.stderr, as: UTF8.self)

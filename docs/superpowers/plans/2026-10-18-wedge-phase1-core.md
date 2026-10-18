@@ -16,7 +16,7 @@
 - Product name **Wedge**; CLI command **wedge**.
 - Offline only: no network calls in any converter.
 - **Never overwrite an existing file silently** — collision policy produces a new name unless `--force`.
-- No AI attribution in any commit message or repo file (no "Claude"/"Anthropic"); `git grep -i -E "claude|anthropic"` must be empty before any commit.
+- No AI-assistant attribution in any commit message or repo file (no assistant or vendor names); the clean-room name check must stay empty before any commit.
 - Only dependency: `apple/swift-argument-parser` (pinned, in the `wedge`/`WedgeCLI` targets only).
 - External tools invoked only via `ProcessRunner` with an argument array (never a shell string).
 
@@ -178,5 +178,5 @@
 
 ## Notes for the executor
 - New repo. Task 1's commit is the scaffold on `main`; cut branch `phase-1-core` after it and do Tasks 2-8 there. Do not push; stop for Rihan's go-ahead before any push/PR.
-- Run `swift test` green before each commit. Before committing, `git grep -i -E "claude|anthropic"` must be empty.
+- Run `swift test` green before each commit. Before committing, the clean-room name check must stay empty.
 - macOS frameworks (ImageIO/CoreGraphics) link automatically on the macOS platform.

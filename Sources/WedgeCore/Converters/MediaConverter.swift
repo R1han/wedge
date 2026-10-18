@@ -20,6 +20,15 @@ public struct MediaConverter: Converter {
     private static let audioFormats: Set<String> = ["mp3", "m4a", "wav", "flac", "aac"]
     private static let videoFormats: Set<String> = ["mp4", "mov", "mkv", "webm"]
 
+    /// Input extension -> ffmpeg demuxer. Forcing it stops a crafted file being probed as a
+    /// reference-following demuxer (concat, hls, ...) that could read arbitrary local paths.
+    private static let inputDemuxers: [String: String] = [
+        "mp4": "mov,mp4,m4a,3gp,3g2,mj2", "m4v": "mov,mp4,m4a,3gp,3g2,mj2",
+        "mov": "mov,mp4,m4a,3gp,3g2,mj2", "m4a": "mov,mp4,m4a,3gp,3g2,mj2",
+        "mkv": "matroska,webm", "webm": "matroska,webm",
+        "mp3": "mp3", "wav": "wav", "flac": "flac", "aac": "aac",
+    ]
+
     /// Generous: long recordings can take a while to transcode.
     private static let timeout: Duration = .seconds(3600)
 
@@ -68,7 +77,13 @@ public struct MediaConverter: Converter {
         defer { try? fm.removeItem(at: tmp) }
 
         // `-y` only ever overwrites the temp file; the destination is placed non-destructively below.
-        let args = ["-nostdin", "-y", "-i", request.input.path, tmp.path]
+        // `-protocol_whitelist file` blocks network and other protocol fetches; the forced input
+        // demuxer (when known) blocks probing the input as a reference-following format.
+        var args = ["-nostdin", "-y", "-protocol_whitelist", "file"]
+        if let demuxer = Self.inputDemuxers[request.input.pathExtension.lowercased()] {
+            args += ["-f", demuxer]
+        }
+        args += ["-i", request.input.path, tmp.path]
         let output = try await runner.run(ffmpeg, args, timeout: Self.timeout)
         progress(0.8)
         guard output.code == 0 else {

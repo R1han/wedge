@@ -71,7 +71,8 @@ public struct PandocConverter: Converter {
         let tmp = directory.appendingPathComponent(".wedge-\(UUID().uuidString).tmp")
         defer { try? fm.removeItem(at: tmp) }
 
-        var args = ["-f", fromName, "-t", toName, "-o", tmp.path]
+        // `--sandbox` stops a crafted document from reading other local files or fetching URLs.
+        var args = ["--sandbox", "-f", fromName, "-t", toName, "-o", tmp.path]
         if Self.standaloneTargets.contains(request.target.id) { args.append("-s") }
         args += ["--", request.input.path]
         let output = try await runner.run(pandoc, args, timeout: Self.timeout)

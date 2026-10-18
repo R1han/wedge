@@ -67,6 +67,47 @@ struct MediaConverterTests {
         #expect(result.bytesWritten > 0)
     }
 
+    @Test func ffmpegArgsRestrictProtocolsAndForceInputDemuxer() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cases: [(name: String, demuxer: String?)] = [
+            ("a.wav", "wav"), ("a.mp3", "mp3"), ("a.flac", "flac"), ("a.aac", "aac"),
+            ("a.mp4", "mov,mp4,m4a,3gp,3g2,mj2"), ("a.mov", "mov,mp4,m4a,3gp,3g2,mj2"),
+            ("a.m4a", "mov,mp4,m4a,3gp,3g2,mj2"), ("a.mkv", "matroska,webm"), ("a.webm", "matroska,webm"),
+        ]
+        for (name, demuxer) in cases {
+            let input = dir.appendingPathComponent(name)
+            try Data([0]).write(to: input)
+            let recorder = RecordingRunner()
+            let converter = MediaConverter(locator: { _ in URL(fileURLWithPath: "/usr/bin/true") }, runner: recorder)
+            let target = name.hasSuffix(".mp3") ? wav : mp3
+            _ = try? await converter.convert(ConversionRequest(input: input, target: target), progress: { _ in })
+            let args = try #require(recorder.lastArgs)
+            let i = try #require(args.firstIndex(of: "-i"))
+            let wl = try #require(args.firstIndex(of: "-protocol_whitelist"))
+            #expect(args[wl + 1] == "file")
+            #expect(wl < i)
+            let f = try #require(args.firstIndex(of: "-f"))
+            #expect(args[f + 1] == demuxer)
+            #expect(f < i)
+            #expect(args.contains("-nostdin") && args.contains("-y"))
+        }
+    }
+
+    @Test(.enabled(if: MediaConverterTests.ffmpegInstalled))
+    func videoToVideoContainersStillWork() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try await makeMP4(in: dir)
+        let mkv = FileFormat.format(forExtension: "mkv")!
+        let viaMKV = try await MediaConverter().convert(
+            ConversionRequest(input: input, target: mkv), progress: { _ in })
+        #expect(size(try #require(viaMKV.outputs.first)) > 0)
+        let viaWebM = try await MediaConverter().convert(
+            ConversionRequest(input: try #require(viaMKV.outputs.first), target: webm), progress: { _ in })
+        #expect(size(try #require(viaWebM.outputs.first)) > 0)
+    }
+
     @Test(.enabled(if: MediaConverterTests.ffmpegInstalled))
     func videoToAudioExtract() async throws {
         let dir = try makeTempDir()
@@ -109,5 +150,15 @@ struct MediaConverterTests {
         await #expect(throws: WedgeError.toolNotInstalled(tool: "ffmpeg", installHint: "brew install ffmpeg")) {
             _ = try await converter.convert(ConversionRequest(input: input, target: mp3), progress: { _ in })
         }
+    }
+}
+
+private final class RecordingRunner: ProcessRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var args: [String]?
+    var lastArgs: [String]? { lock.withLock { args } }
+    func run(_ executable: URL, _ args: [String], timeout: Duration) async throws -> ProcessRunner.Output {
+        lock.withLock { self.args = args }
+        return ProcessRunner.Output(stdout: Data(), stderr: Data(), code: 1)
     }
 }

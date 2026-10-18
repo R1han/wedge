@@ -104,6 +104,21 @@ struct PandocConverterTests {
         #expect(args.contains("-s"))
     }
 
+    @Test func pandocRunsSandboxed() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makeMarkdown(in: dir)
+        let recorder = RecordingRunner()
+        let converter = PandocConverter(locator: { _ in URL(fileURLWithPath: "/usr/bin/true") }, runner: recorder)
+        _ = try? await converter.convert(
+            ConversionRequest(input: input, target: docx, outputDirectory: nil, options: .init()),
+            progress: { _ in })
+        let args = try #require(recorder.lastArgs)
+        let sandbox = try #require(args.firstIndex(of: "--sandbox"))
+        let separator = try #require(args.firstIndex(of: "--"))
+        #expect(sandbox < separator)
+    }
+
     @Test func missingInputThrowsInputNotFound() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

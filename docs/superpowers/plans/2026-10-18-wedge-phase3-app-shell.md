@@ -31,9 +31,9 @@
 ## Task 1: App scaffold (xcodegen) + menu-bar shell
 **Files:** Create `project.yml`, `App/WedgeApp.swift`, `App/Info.plist` (or generated), `App/Assets.xcassets` (placeholder icon), `scripts/build-app.sh`; Modify `.gitignore` (ignore `*.xcodeproj`, `DerivedData/`).
 **Interfaces:** Produces an `Wedge` macOS app target (`LSUIElement` true) linking the local `WedgeCore` package; a SwiftUI `@main struct WedgeApp: App` with a `MenuBarExtra` showing a placeholder menu (Quit). `scripts/build-app.sh` runs `xcodegen generate` then `xcodebuild -scheme Wedge -destination 'platform=macOS' build`.
-- [ ] Step 1: Write `project.yml` (app target, deployment macOS 13, LSUIElement, package dependency on `.` WedgeCore), minimal `WedgeApp` with MenuBarExtra, build script.
-- [ ] Step 2: `bash scripts/build-app.sh` → app builds; launching shows a menu-bar item (manual check noted in report).
-- [ ] Step 3: Commit `feat: scaffold Wedge menu-bar app via xcodegen`.
+- [x] Step 1: Write `project.yml` (app target, deployment macOS 13, LSUIElement, package dependency on `.` WedgeCore), minimal `WedgeApp` with MenuBarExtra, build script.
+- [x] Step 2: `bash scripts/build-app.sh` → app builds; launching shows a menu-bar item (manual check noted in report).
+- [x] Step 3: Commit `feat: scaffold Wedge menu-bar app via xcodegen`.
 (No unit test here — deliverable is "it builds + shows in the menu bar"; verified by the build script.)
 
 ## Task 2: ConversionModel (testable view-model)

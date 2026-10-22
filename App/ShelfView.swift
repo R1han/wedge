@@ -8,18 +8,38 @@ private extension FileFormat {
 
 struct ShelfView: View {
     @ObservedObject var model: ConversionModel
+    @ObservedObject var settings: SettingsModel
 
     @State private var selectedTarget: FileFormat?
     @State private var quality = 0.8
     @State private var stripMetadata = false
     @State private var maxDimensionText = ""
     @State private var replaceExisting = false
-    @State private var outputDirectory: URL?
+    /// A folder picked in the shelf for this session; nil follows the saved setting.
+    @State private var outputOverride: OutputOverride?
     @State private var isDropTargeted = false
 
     private var target: FileFormat? {
         if let selectedTarget, model.targets.contains(selectedTarget) { return selectedTarget }
-        return model.targets.first
+        return settings.preferredTarget(among: model.targets) ?? model.targets.first
+    }
+
+    private enum OutputOverride { case nextToOriginals, folder(URL) }
+
+    private var outputDirectory: URL? {
+        switch outputOverride {
+        case .nextToOriginals: nil
+        case .folder(let url): settings.directoryExists(url) ? url : nil
+        case nil: settings.resolvedOutputDirectory
+        }
+    }
+
+    private var outputNote: String? {
+        switch outputOverride {
+        case .nextToOriginals: nil
+        case .folder(let url): settings.directoryExists(url) ? nil : "The chosen folder no longer exists. Files are saved next to the originals."
+        case nil: settings.outputFolderNote
+        }
     }
 
     private var hasConvertibleItems: Bool { model.items.contains(where: \.isConvertible) }
@@ -82,6 +102,11 @@ struct ShelfView: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
+            if let outputNote {
+                Text(outputNote)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
             if noCommonFormat {
                 Text("These files have no common format \u{2014} remove some to continue")
                     .font(.callout)
@@ -131,7 +156,7 @@ struct ShelfView: View {
 
     private var outputMenu: some View {
         Menu {
-            Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in outputDirectory = nil }))
+            Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in outputOverride = .nextToOriginals }))
             Toggle(
                 outputDirectory.map { "Folder: \($0.lastPathComponent)" } ?? "Choose folder\u{2026}",
                 isOn: Binding(get: { outputDirectory != nil }, set: { _ in chooseOutputFolder() })
@@ -209,7 +234,7 @@ struct ShelfView: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        present(panel) { outputDirectory = panel.url }
+        present(panel) { panel.url.map { outputOverride = .folder($0) } }
     }
 
     /// Shows the panel as a sheet on the shelf (or free-standing if it has no window), without blocking the run loop.

@@ -57,11 +57,11 @@
 ## Task 4: Settings + Launch-at-Login
 **Files:** Create `App/SettingsView.swift`, `App/LoginItemService.swift`; Test `AppTests/LoginItemServiceTests.swift`, `AppTests/SettingsModelTests.swift`.
 **Interfaces:** `protocol LoginItemService: Sendable { var isEnabled: Bool { get }; func setEnabled(_:) throws }` with a real impl over `SMAppService.mainApp` and a fake; a settings model persisting default target format + output-directory policy via `@AppStorage`. SettingsView toggles launch-at-login (reflecting real status; errors surfaced).
-- [ ] Step 1: Failing tests — fake LoginItemService toggles state and surfaces thrown errors; settings model round-trips defaults.
-- [ ] Step 2: run → FAIL.
-- [ ] Step 3: Implement LoginItemService (+fake), settings model, SettingsView.
-- [ ] Step 4: tests → PASS; app builds; manual: toggle launch-at-login, verify in System Settings → Login Items (note in report).
-- [ ] Step 5: Commit `feat: add settings and launch-at-login`.
+- [x] Step 1: Failing tests — fake LoginItemService toggles state and surfaces thrown errors; settings model round-trips defaults.
+- [x] Step 2: run → FAIL.
+- [x] Step 3: Implement LoginItemService (+fake), settings model, SettingsView.
+- [x] Step 4: tests → PASS; app builds; manual: toggle launch-at-login, verify in System Settings → Login Items (note in report).
+- [x] Step 5: Commit `feat: add settings and launch-at-login`.
 
 ## Task 5: Menu-bar menu + lifecycle
 **Files:** Modify `App/WedgeApp.swift`; Create `App/MenuBarContent.swift`.

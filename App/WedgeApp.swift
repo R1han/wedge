@@ -7,6 +7,10 @@ struct WedgeApp: App {
             Button("Open Shelf") {
                 ShelfWindowController.shared.show()
             }
+            Button("Settings\u{2026}") {
+                SettingsWindowController.shared.show()
+            }
+            .keyboardShortcut(",")
             Button("Quit Wedge") {
                 NSApplication.shared.terminate(nil)
             }

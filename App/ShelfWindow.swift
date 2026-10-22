@@ -40,7 +40,7 @@ final class ShelfWindowController {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: ShelfView(model: model))
+        panel.contentView = NSHostingView(rootView: ShelfView(model: model, settings: .shared))
         if !panel.setFrameUsingName(Self.autosaveName) { panel.center() }
         panel.setFrameAutosaveName(Self.autosaveName)
         return panel

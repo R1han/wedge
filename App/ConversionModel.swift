@@ -8,6 +8,11 @@ final class ConversionModel: ObservableObject {
         let id: UUID
         let url: URL
         var state: ItemState
+
+        var isConvertible: Bool {
+            if case .unsupported = state { return false }
+            return true
+        }
     }
 
     enum ItemState: Equatable {
@@ -16,14 +21,17 @@ final class ConversionModel: ObservableObject {
         case done([URL], FileFormat)
         case failed(String)
         case cancelled
+        /// No target exists for this file (missing, or a type Wedge cannot convert); never part of a run.
+        case unsupported(String)
     }
 
     @Published private(set) var items: [Item] = []
     @Published private(set) var isConverting = false
-    /// Targets valid for every item; empty when there are no items or any item has none.
+    /// Targets valid for every convertible item; empty when there are none or they share no target.
     @Published private(set) var targets: [FileFormat] = []
 
     private let service: ConversionService
+    private var itemTargets: [UUID: [FileFormat]] = [:]
     private var task: Task<[Result<ConversionResult, Error>], Never>?
 
     private static let log = Logger(subsystem: "com.r1han.wedge", category: "conversion")
@@ -41,10 +49,12 @@ final class ConversionModel: ObservableObject {
             if let index = items.firstIndex(where: { $0.url == normalized }) {
                 switch items[index].state {
                 case .done, .failed, .cancelled: items[index].state = .pending
+                case .unsupported: classify(index)
                 case .pending, .running: break
                 }
             } else {
                 items.append(Item(id: UUID(), url: normalized, state: .pending))
+                classify(items.count - 1)
             }
         }
         refreshTargets()
@@ -53,20 +63,27 @@ final class ConversionModel: ObservableObject {
     func clear() {
         guard !isConverting else { return }
         items.removeAll()
+        itemTargets.removeAll()
         refreshTargets()
+    }
+
+    func remove(_ id: UUID) {
+        guard !isConverting, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items.remove(at: index)
+        itemTargets[id] = nil
+        refreshTargets()
+    }
+
+    /// Whether `convert(to:)` would have anything to do for this target.
+    func hasWork(for target: FileFormat) -> Bool {
+        !isConverting && !eligibleIndices(for: target).isEmpty
     }
 
     /// Converts the items that still need it: pending, failed and cancelled ones, and done ones
     /// whose last conversion was to a different target. A call while a run is in flight does nothing.
     func convert(to target: FileFormat, options: ConversionOptions, outputDirectory: URL? = nil) async {
         guard !isConverting else { return }
-        let indices = items.indices.filter {
-            switch items[$0].state {
-            case .pending, .failed, .cancelled: true
-            case .done(_, let last): last != target
-            case .running: false
-            }
-        }
+        let indices = eligibleIndices(for: target)
         guard !indices.isEmpty else { return }
 
         let ids = indices.map { items[$0].id }
@@ -128,15 +145,38 @@ final class ConversionModel: ObservableObject {
         return line.prefix(maxMessageLength) + "\u{2026}"
     }
 
+    private func eligibleIndices(for target: FileFormat) -> [Int] {
+        items.indices.filter {
+            switch items[$0].state {
+            case .pending, .failed, .cancelled: true
+            case .done(_, let last): last != target
+            case .running, .unsupported: false
+            }
+        }
+    }
+
+    /// Looks up the item's targets and marks it unsupported when it has none.
+    private func classify(_ index: Int) {
+        let item = items[index]
+        let available = service.availableTargets(for: item.url)
+        itemTargets[item.id] = available
+        if available.isEmpty {
+            let exists = FileManager.default.fileExists(atPath: item.url.path)
+            items[index].state = .unsupported(exists ? "Unsupported file type" : "File not found")
+        } else {
+            items[index].state = .pending
+        }
+    }
+
     private func refreshTargets() {
-        guard let first = items.first else {
+        let lists = items.filter(\.isConvertible).compactMap { itemTargets[$0.id] }
+        guard var common = lists.first else {
             targets = []
             return
         }
-        var common = service.availableTargets(for: first.url)
-        for item in items.dropFirst() {
-            let available = Set(service.availableTargets(for: item.url))
-            common.removeAll { !available.contains($0) }
+        for available in lists.dropFirst() {
+            let set = Set(available)
+            common.removeAll { !set.contains($0) }
         }
         targets = common
     }

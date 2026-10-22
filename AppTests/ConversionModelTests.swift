@@ -81,7 +81,7 @@ private struct GatedConverter: Converter {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = ConversionModel()
-        model.add([dir.appendingPathComponent("a.png"), dir.appendingPathComponent("b.png")])
+        model.add([try makePNG(in: dir, name: "a.png"), try makePNG(in: dir, name: "b.png")])
         #expect(model.items.count == 2)
         #expect(model.items.allSatisfy { $0.state == .pending })
     }
@@ -127,7 +127,7 @@ private struct GatedConverter: Converter {
         #expect(model.targets.count < pngTargets.count)
     }
 
-    @Test func targetsAreEmptyForNoItemsOrAnyMissingFile() throws {
+    @Test func targetsAreEmptyForNoItems() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let png = try makePNG(in: dir)
@@ -135,8 +135,6 @@ private struct GatedConverter: Converter {
         #expect(model.targets.isEmpty)
         model.add([png])
         #expect(!model.targets.isEmpty)
-        model.add([dir.appendingPathComponent("missing.png")])
-        #expect(model.targets.isEmpty)
         model.clear()
         #expect(model.targets.isEmpty)
     }
@@ -162,9 +160,10 @@ private struct GatedConverter: Converter {
     @Test func convertReportsReadableFailureForMissingInput() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let missing = dir.appendingPathComponent("gone.png")
+        let png = try makePNG(in: dir, name: "gone.png")
         let model = ConversionModel()
-        model.add([missing])
+        model.add([png])
+        try FileManager.default.removeItem(at: png)
         await model.convert(to: jpeg, options: ConversionOptions())
         guard case .failed(let message) = model.items[0].state else {
             Issue.record("expected failed, got \(model.items[0].state)")
@@ -303,7 +302,9 @@ private struct GatedConverter: Converter {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = ConversionModel()
-        model.add([dir.appendingPathComponent("later.png")])
+        let png = try makePNG(in: dir, name: "later.png")
+        model.add([png])
+        try FileManager.default.removeItem(at: png)
         await model.convert(to: jpeg, options: ConversionOptions())
         guard case .failed = model.items[0].state else {
             Issue.record("expected failed, got \(model.items[0].state)")
@@ -396,5 +397,108 @@ private struct GatedConverter: Converter {
         let jpgs = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".jpg") }
         #expect(jpgs.count == 2)
         #expect(second[0].lastPathComponent == "src-1.jpg")
+    }
+
+    @Test func missingFileIsUnsupportedWithReason() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = ConversionModel()
+        model.add([dir.appendingPathComponent("missing.png")])
+        #expect(model.items[0].state == .unsupported("File not found"))
+        #expect(!model.items[0].isConvertible)
+        #expect(model.targets.isEmpty)
+    }
+
+    @Test func unknownFileTypeIsUnsupportedWithReason() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let odd = dir.appendingPathComponent("doc.pdf")
+        try Data([0]).write(to: odd)
+        let (model, _) = gatedModel()
+        model.add([odd])
+        #expect(model.items[0].state == .unsupported("Unsupported file type"))
+    }
+
+    @Test func targetsIgnoreUnsupportedItems() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try makePNG(in: dir)
+        let model = ConversionModel()
+        model.add([png])
+        let pngTargets = model.targets
+        model.add([dir.appendingPathComponent("missing.png")])
+        #expect(model.items.count == 2)
+        #expect(model.targets == pngTargets)
+        #expect(model.items[0].isConvertible)
+        #expect(!model.items[1].isConvertible)
+    }
+
+    @Test func unsupportedItemIsSkippedByConvertAndKeepsItsState() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try makePNG(in: dir)
+        let model = ConversionModel()
+        model.add([png, dir.appendingPathComponent("missing.png")])
+        await model.convert(to: jpeg, options: ConversionOptions())
+        guard case .done = model.items[0].state else {
+            Issue.record("expected done, got \(model.items[0].state)")
+            return
+        }
+        #expect(model.items[1].state == .unsupported("File not found"))
+    }
+
+    @Test func redroppingAnUnsupportedFileReevaluatesIt() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = ConversionModel()
+        let later = dir.appendingPathComponent("later.png")
+        model.add([later])
+        #expect(model.items[0].state == .unsupported("File not found"))
+        _ = try makePNG(in: dir, name: "later.png")
+        model.add([later])
+        #expect(model.items.count == 1)
+        #expect(model.items[0].state == .pending)
+        #expect(!model.targets.isEmpty)
+    }
+
+    @Test func hasWorkReflectsConvertibleItemsAndTarget() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = ConversionModel()
+        #expect(!model.hasWork(for: jpeg))
+        model.add([dir.appendingPathComponent("missing.png")])
+        #expect(!model.hasWork(for: jpeg))
+        model.add([try makePNG(in: dir)])
+        #expect(model.hasWork(for: jpeg))
+    }
+
+    @Test func removeDropsItemAndRecomputesTargets() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try makePNG(in: dir)
+        let pdf = dir.appendingPathComponent("doc.pdf")
+        try Data([0]).write(to: pdf)
+        let model = ConversionModel()
+        model.add([png, pdf])
+        let narrowed = model.targets
+        model.remove(model.items[1].id)
+        #expect(model.items.count == 1)
+        #expect(model.targets.count > narrowed.count)
+        #expect(model.targets.contains(jpeg))
+        model.remove(UUID())
+        #expect(model.items.count == 1)
+    }
+
+    @Test func removeIsRefusedWhileConverting() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _) = gatedModel()
+        model.add([try makePNG(in: dir, name: "slow.png")])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        #expect(await waitUntil { model.isConverting })
+        model.remove(model.items[0].id)
+        #expect(model.items.count == 1)
+        model.cancel()
+        await run.value
     }
 }

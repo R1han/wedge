@@ -48,11 +48,11 @@
 ## Task 3: Floating file shelf (drag-drop + convert UI)
 **Files:** Create `App/ShelfView.swift`, `App/ShelfWindow.swift` (NSWindow/NSPanel host or SwiftUI `Window`); Test `AppTests/DropHandlingTests.swift`.
 **Interfaces:** A shelf window that accepts dropped files (`onDrop`/NSItemProvider → `[URL]` via a testable `DropHandler.urls(from:) async -> [URL]`), lists chips, shows a target-format `Picker` from `model.availableTargets`, options (quality/strip toggles), a Convert button → `model.convert`, per-item progress, and "Reveal in Finder" for outputs. Unsupported drops are shown as unconvertible (no silent no-op).
-- [ ] Step 1: Failing test for `DropHandler.urls(from:)` (NSItemProvider with file URLs → URLs; non-file provider → empty) and that availableTargets drives the picker (model-level).
-- [ ] Step 2: run → FAIL.
-- [ ] Step 3: Implement the shelf view/window + DropHandler, wired to ConversionModel.
-- [ ] Step 4: tests → PASS; app builds; manual: drop a file, convert, see progress + output (note in report).
-- [ ] Step 5: Commit `feat: add floating file shelf with drag-drop conversion`.
+- [x] Step 1: Failing test for `DropHandler.urls(from:)` (NSItemProvider with file URLs → URLs; non-file provider → empty) and that availableTargets drives the picker (model-level).
+- [x] Step 2: run → FAIL.
+- [x] Step 3: Implement the shelf view/window + DropHandler, wired to ConversionModel.
+- [x] Step 4: tests → PASS; app builds; manual: drop a file, convert, see progress + output (note in report).
+- [x] Step 5: Commit `feat: add floating file shelf with drag-drop conversion`.
 
 ## Task 4: Settings + Launch-at-Login
 **Files:** Create `App/SettingsView.swift`, `App/LoginItemService.swift`; Test `AppTests/LoginItemServiceTests.swift`, `AppTests/SettingsModelTests.swift`.

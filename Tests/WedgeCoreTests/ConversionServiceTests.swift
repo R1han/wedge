@@ -183,4 +183,37 @@ struct ConversionServiceTests {
         #expect(succeeded < 20)
         #expect(await recorder.started < 20)
     }
+
+    @Test func availableTargetsForImageListsImageTargetsInCatalogOrder() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: input)
+        #expect(targets.contains(jpeg))
+        #expect(!targets.contains(png))
+        let fromPairs = Wedge.defaultRegistry().pairs().filter { $0.from == png }.map(\.to.id)
+        #expect(Set(targets.map(\.id)) == Set(fromPairs))
+    }
+
+    @Test func availableTargetsForDirectoryOffersArchives() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: dir)
+        #expect(targets.map(\.id).contains("zip"))
+        #expect(!targets.contains(jpeg))
+    }
+
+    @Test func availableTargetsForMissingInputIsEmpty() {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("nope-\(UUID().uuidString).png")
+        #expect(ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: missing).isEmpty)
+    }
+
+    @Test func availableTargetsForUnknownExtensionFollowsRegistryRules() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try touch(dir, "blob.xyz")
+        #expect(ConversionService(registry: ConverterRegistry()).availableTargets(for: input).isEmpty)
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: input)
+        #expect(targets.map(\.id).sorted() == ["tar", "zip"])
+    }
 }

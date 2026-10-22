@@ -39,11 +39,11 @@
 ## Task 2: ConversionModel (testable view-model)
 **Files:** Create `App/ConversionModel.swift`; Test `AppTests/ConversionModelTests.swift` (app unit-test target in project.yml).
 **Interfaces:** `@MainActor @Observable final class ConversionModel { struct Item: Identifiable { let id; let url: URL; var state: ItemState } ; enum ItemState { case pending, running(Double), done([URL]), failed(String) } ; var items: [Item]; init(service: ConversionService = .init(registry: Wedge.defaultRegistry())); func add(_ urls: [URL]); func availableTargets(for: [URL]) -> [FileFormat]; func convert(to: FileFormat, options: ConversionOptions) async; func cancel() }`. Bridges the async `convertBatch` to per-item `@Observable` state; cancel cancels the task.
-- [ ] Step 1: Failing tests — add() populates items as pending; availableTargets(for:) returns registry pairs for the inputs; convert(to:) drives items pending→running→done using a stubbed/real service (use a tiny real image fixture); cancel() marks in-flight/pending appropriately.
-- [ ] Step 2: run app-target tests → FAIL.
-- [ ] Step 3: Implement ConversionModel.
-- [ ] Step 4: tests → PASS; app still builds.
-- [ ] Step 5: Commit `feat: add ConversionModel bridging ConversionService to SwiftUI`.
+- [x] Step 1: Failing tests — add() populates items as pending; availableTargets(for:) returns registry pairs for the inputs; convert(to:) drives items pending→running→done using a stubbed/real service (use a tiny real image fixture); cancel() marks in-flight/pending appropriately.
+- [x] Step 2: run app-target tests → FAIL.
+- [x] Step 3: Implement ConversionModel.
+- [x] Step 4: tests → PASS; app still builds.
+- [x] Step 5: Commit `feat: add ConversionModel bridging ConversionService to SwiftUI`.
 
 ## Task 3: Floating file shelf (drag-drop + convert UI)
 **Files:** Create `App/ShelfView.swift`, `App/ShelfWindow.swift` (NSWindow/NSPanel host or SwiftUI `Window`); Test `AppTests/DropHandlingTests.swift`.

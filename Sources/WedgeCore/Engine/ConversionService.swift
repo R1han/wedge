@@ -32,6 +32,16 @@ public final class ConversionService: Sendable {
         return try await converter.convert(request, progress: progress)
     }
 
+    /// Targets `convert` would accept for this input, in catalog order (the archive directory
+    /// pseudo-format last). Empty when the input does not exist.
+    public func availableTargets(for input: URL) -> [FileFormat] {
+        guard FileManager.default.fileExists(atPath: input.path) else { return [] }
+        let from = Self.sourceFormat(for: input)
+        return (FileFormat.known + [ArchiveConverter.directoryFormat]).filter {
+            $0 != from && registry.converter(from: from, to: $0) != nil
+        }
+    }
+
     /// Resolves the input's format. Directories and files with an unrecognised extension get a
     /// synthesized `.other` format so the registry (not this lookup) decides whether they convert.
     private static func sourceFormat(for input: URL) -> FileFormat {

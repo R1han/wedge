@@ -121,7 +121,7 @@ public struct ImageConverter: Converter {
             } else {
                 for key in Self.metadataKeys { if let v = sourceProps[key] { props[key] = v } }
             }
-            if let q = options.quality, request.target.id == "jpeg" || request.target.id == "heic" {
+            if let q = options.quality, request.target.supportsQuality {
                 props[kCGImageDestinationLossyCompressionQuality] = q
             }
             CGImageDestinationAddImage(dest, image, props as CFDictionary)

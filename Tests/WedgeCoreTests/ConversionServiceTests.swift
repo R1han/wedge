@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import os
 import UniformTypeIdentifiers
 import Testing
 @testable import WedgeCore
@@ -182,5 +183,76 @@ struct ConversionServiceTests {
         #expect(cancelled >= 1)
         #expect(succeeded < 20)
         #expect(await recorder.started < 20)
+    }
+
+    @Test func availableTargetsForImageListsImageTargetsInCatalogOrder() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try makePNG(in: dir)
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: input)
+        #expect(targets.contains(jpeg))
+        #expect(!targets.contains(png))
+        let fromPairs = Wedge.defaultRegistry().pairs().filter { $0.from == png }.map(\.to.id)
+        #expect(Set(targets.map(\.id)) == Set(fromPairs))
+    }
+
+    @Test func availableTargetsForDirectoryOffersArchives() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: dir)
+        #expect(targets.map(\.id).contains("zip"))
+        #expect(!targets.contains(jpeg))
+    }
+
+    @Test func availableTargetsForMissingInputIsEmpty() {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("nope-\(UUID().uuidString).png")
+        #expect(ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: missing).isEmpty)
+    }
+
+    @Test func availableTargetsForUnknownExtensionFollowsRegistryRules() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let input = try touch(dir, "blob.xyz")
+        #expect(ConversionService(registry: ConverterRegistry()).availableTargets(for: input).isEmpty)
+        let targets = ConversionService(registry: Wedge.defaultRegistry()).availableTargets(for: input)
+        #expect(targets.map(\.id).contains("zip"))
+        #expect(targets.map(\.id).contains("tar"))
+    }
+
+    @Test func batchReportsEachFinishedItemOnceWithItsIndex() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = ConverterRegistry()
+        registry.register(SlowStub(from: png, to: jpeg, recorder: PeakRecorder(), delay: .milliseconds(10)))
+        let requests = try (0..<5).map { ConversionRequest(input: try touch(dir, "f\($0).png"), target: jpeg) }
+        let finished = OSAllocatedUnfairLock(initialState: [Int]())
+        let results = await ConversionService(registry: registry).convertBatch(requests, maxConcurrent: 2, onItemFinished: { index, result in
+            if case .success = result { finished.withLock { $0.append(index) } }
+        })
+        #expect(results.count == 5)
+        #expect(finished.withLock { $0 }.sorted() == [0, 1, 2, 3, 4])
+    }
+
+    @Test func batchReportsCancelledItemsToo() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = ConverterRegistry()
+        registry.register(SlowStub(from: png, to: jpeg, recorder: PeakRecorder(), delay: .milliseconds(100)))
+        let requests = try (0..<20).map { ConversionRequest(input: try touch(dir, "f\($0).png"), target: jpeg) }
+        let finished = OSAllocatedUnfairLock(initialState: [Int: Bool]())
+        let service = ConversionService(registry: registry)
+        let task = Task {
+            await service.convertBatch(requests, maxConcurrent: 1, onItemFinished: { index, result in
+                let cancelled: Bool
+                if case .failure(let e) = result { cancelled = (e as? WedgeError) == .cancelled } else { cancelled = false }
+                finished.withLock { $0[index] = cancelled }
+            })
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        task.cancel()
+        _ = await task.value
+        let seen = finished.withLock { $0 }
+        #expect(seen.count == 20)
+        #expect(seen.values.contains(true))
     }
 }

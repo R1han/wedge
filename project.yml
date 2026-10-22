@@ -1,0 +1,62 @@
+name: Wedge
+options:
+  bundleIdPrefix: com.r1han
+  deploymentTarget:
+    macOS: "13.0"
+packages:
+  WedgeCore:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Wedge:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    dependencies:
+      - package: WedgeCore
+        product: WedgeCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: Wedge
+        CFBundleDisplayName: Wedge
+        LSUIElement: true
+        LSMinimumSystemVersion: "13.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.r1han.wedge
+        PRODUCT_NAME: Wedge
+        PRODUCT_MODULE_NAME: WedgeApp
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  WedgeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - AppTests
+    dependencies:
+      - target: Wedge
+      - package: WedgeCore
+        product: WedgeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.r1han.wedge.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Wedge.app/Contents/MacOS/Wedge"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  Wedge:
+    build:
+      targets:
+        Wedge: all
+    test:
+      targets:
+        - WedgeTests

@@ -27,7 +27,9 @@ Our own code, assets, and brand; inspired by Tangerine's ideas, nothing copied.
 ## Action Wheel (kept + improved) — later phase
 Drag a file past ~4pt -> NSDraggingSession; `ignoreModifierKeysForDraggingSession:` = NO
 so modifiers stay live; held modifier combo selects ring (Conversions/Tools/Actions),
-each a remappable `ModifierCombination` OptionSet in @AppStorage. Improvements:
+each a remappable `ModifierCombination` OptionSet in @AppStorage. The wheel also opens for
+drags that start in other apps (Finder, desktop) while a modifier is held, which needs a
+system-wide watcher and the permission the wheel spike identifies (see the GUI spec). Improvements:
 discoverability (hint overlay, first-run tutorial, hotkey + menu-bar open), accessibility
 (keyboard + VoiceOver), batch + progress/cancel, presets + history, watch folders,
 privacy/quality controls, Finder/Services + Share extension, never-overwrite safety.

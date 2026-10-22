@@ -32,6 +32,16 @@ public final class ConversionService: Sendable {
         return try await converter.convert(request, progress: progress)
     }
 
+    /// Targets `convert` would accept for this input, in catalog order (the archive directory
+    /// pseudo-format last). Empty when the input does not exist.
+    public func availableTargets(for input: URL) -> [FileFormat] {
+        guard FileManager.default.fileExists(atPath: input.path) else { return [] }
+        let from = Self.sourceFormat(for: input)
+        return (FileFormat.known + [ArchiveConverter.directoryFormat]).filter {
+            $0 != from && registry.converter(from: from, to: $0) != nil
+        }
+    }
+
     /// Resolves the input's format. Directories and files with an unrecognised extension get a
     /// synthesized `.other` format so the registry (not this lookup) decides whether they convert.
     private static func sourceFormat(for input: URL) -> FileFormat {
@@ -46,40 +56,52 @@ public final class ConversionService: Sendable {
 
     /// Converts every request, at most `maxConcurrent` at a time. Results are returned in
     /// request order. Once the surrounding task is cancelled no new work starts, and every
-    /// item that did not complete is reported as `WedgeError.cancelled`.
+    /// item that did not complete is reported as `WedgeError.cancelled`. `onItemFinished` is
+    /// called once per request, with its index, as soon as that item has a result.
     public func convertBatch(
         _ requests: [ConversionRequest],
         maxConcurrent: Int = 4,
-        progress: @Sendable (ConversionProgress) -> Void = { _ in }
+        progress: @Sendable (ConversionProgress) -> Void = { _ in },
+        onItemFinished: @Sendable (Int, Result<ConversionResult, Error>) -> Void = { _, _ in }
     ) async -> [Result<ConversionResult, Error>] {
         let cap = max(1, maxConcurrent)
         return await withoutActuallyEscaping(progress) { progress in
-            var results = [Result<ConversionResult, Error>?](repeating: nil, count: requests.count)
-            await withTaskGroup(of: (Int, Result<ConversionResult, Error>).self) { group in
-                var running = 0
-                for (index, request) in requests.enumerated() {
-                    if running >= cap, let (i, r) = await group.next() {
-                        results[i] = r
-                        running -= 1
-                    }
-                    if Task.isCancelled { break }
-                    running += 1
-                    group.addTask {
-                        do {
-                            let result = try await self.convert(request) {
-                                progress(ConversionProgress(request: request, fraction: $0))
+            await withoutActuallyEscaping(onItemFinished) { onItemFinished in
+                var results = [Result<ConversionResult, Error>?](repeating: nil, count: requests.count)
+                await withTaskGroup(of: (Int, Result<ConversionResult, Error>).self) { group in
+                    var running = 0
+                    for (index, request) in requests.enumerated() {
+                        if running >= cap, let (i, r) = await group.next() {
+                            results[i] = r
+                            running -= 1
+                        }
+                        if Task.isCancelled { break }
+                        running += 1
+                        group.addTask {
+                            let outcome: Result<ConversionResult, Error>
+                            do {
+                                let result = try await self.convert(request) {
+                                    progress(ConversionProgress(request: request, fraction: $0))
+                                }
+                                outcome = .success(result)
+                            } catch is CancellationError {
+                                outcome = .failure(WedgeError.cancelled)
+                            } catch {
+                                outcome = .failure(error)
                             }
-                            return (index, .success(result))
-                        } catch is CancellationError {
-                            return (index, .failure(WedgeError.cancelled))
-                        } catch {
-                            return (index, .failure(error))
+                            onItemFinished(index, outcome)
+                            return (index, outcome)
                         }
                     }
+                    for await (i, r) in group { results[i] = r }
                 }
-                for await (i, r) in group { results[i] = r }
+                return results.enumerated().map { index, result in
+                    if let result { return result }
+                    let cancelled: Result<ConversionResult, Error> = .failure(WedgeError.cancelled)
+                    onItemFinished(index, cancelled)
+                    return cancelled
+                }
             }
-            return results.map { $0 ?? .failure(WedgeError.cancelled) }
         }
     }
 }

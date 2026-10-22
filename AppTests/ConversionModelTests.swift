@@ -11,8 +11,10 @@ private actor StartCounter {
     func record() { started += 1 }
 }
 
-/// png -> jpeg stub: names starting with "slow" report 0.5 then wait until cancelled,
-/// anything else reports 1 and returns without suspending again, so cancellation cannot reach it.
+/// png -> jpeg stub, behaviour chosen by file name prefix:
+/// "slow" (also "slowa", "slowb") reports a fixed fraction, then waits until cancelled;
+/// "mono" reports 0.8 then 0.3 (a regression), then waits until cancelled;
+/// "bad" throws; anything else reports 1 and returns, with no suspension after the report.
 private struct GatedConverter: Converter {
     let id = "stub.gated"
     let counter: StartCounter
@@ -21,8 +23,14 @@ private struct GatedConverter: Converter {
 
     func convert(_ request: ConversionRequest, progress: @Sendable (Double) -> Void) async throws -> ConversionResult {
         await counter.record()
-        if request.input.lastPathComponent.hasPrefix("slow") {
-            progress(0.5)
+        let name = request.input.lastPathComponent
+        if name.hasPrefix("bad") { throw WedgeError.invalidInput("boom") }
+        if name.hasPrefix("mono") {
+            progress(0.8)
+            progress(0.3)
+            try await Task.sleep(for: .seconds(60))
+        } else if name.hasPrefix("slow") {
+            progress(name.hasPrefix("slowa") ? 0.25 : name.hasPrefix("slowb") ? 0.75 : 0.5)
             try await Task.sleep(for: .seconds(60))
         } else {
             progress(1)
@@ -89,28 +97,48 @@ private struct GatedConverter: Converter {
         #expect(model.items.count == 1)
     }
 
-    @Test func availableTargetsIsIntersectionAcrossInputs() throws {
+    @Test func addDedupesPathsThatDifferOnlyBySymlinkPrefix() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try makePNG(in: dir)
+        try #require(png.path.hasPrefix("/var/"), "temp dir is expected to live under /var (a symlink to /private/var)")
+        let viaPrivate = URL(fileURLWithPath: "/private" + png.path)
+        #expect(FileManager.default.fileExists(atPath: viaPrivate.path))
+        let model = ConversionModel()
+        model.add([png, viaPrivate])
+        #expect(model.items.count == 1)
+    }
+
+    @Test func targetsAreIntersectionAcrossItems() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let png = try makePNG(in: dir)
         let pdf = dir.appendingPathComponent("doc.pdf")
         try Data([0]).write(to: pdf)
         let model = ConversionModel()
-        let pngTargets = model.availableTargets(for: [png])
-        let pdfTargets = model.availableTargets(for: [pdf])
+        model.add([png])
+        let pngTargets = model.targets
         #expect(pngTargets.contains(jpeg))
-        let both = model.availableTargets(for: [png, pdf])
-        #expect(both == pngTargets.filter(pdfTargets.contains))
-        #expect(both.count < pngTargets.count)
+        model.clear()
+        model.add([pdf])
+        let pdfTargets = model.targets
+        model.add([png])
+        #expect(model.targets == pngTargets.filter(pdfTargets.contains))
+        #expect(model.targets.count < pngTargets.count)
     }
 
-    @Test func availableTargetsIsEmptyForNoInputsOrAnyMissingInput() throws {
+    @Test func targetsAreEmptyForNoItemsOrAnyMissingFile() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let png = try makePNG(in: dir)
         let model = ConversionModel()
-        #expect(model.availableTargets(for: []).isEmpty)
-        #expect(model.availableTargets(for: [png, dir.appendingPathComponent("missing.png")]).isEmpty)
+        #expect(model.targets.isEmpty)
+        model.add([png])
+        #expect(!model.targets.isEmpty)
+        model.add([dir.appendingPathComponent("missing.png")])
+        #expect(model.targets.isEmpty)
+        model.clear()
+        #expect(model.targets.isEmpty)
     }
 
     @Test func convertDrivesItemsToDoneWithRealOutput() async throws {
@@ -121,10 +149,11 @@ private struct GatedConverter: Converter {
         model.add([png])
         await model.convert(to: jpeg, options: ConversionOptions())
         #expect(!model.isConverting)
-        guard case .done(let outputs) = model.items[0].state else {
+        guard case .done(let outputs, let target) = model.items[0].state else {
             Issue.record("expected done, got \(model.items[0].state)")
             return
         }
+        #expect(target == jpeg)
         #expect(outputs.count == 1)
         #expect(FileManager.default.fileExists(atPath: outputs[0].path))
         #expect(outputs[0].pathExtension == "jpg")
@@ -145,16 +174,63 @@ private struct GatedConverter: Converter {
         #expect(!message.contains("WedgeError"))
     }
 
+    @Test func toolFailureMessageIsFirstLineAndTruncated() {
+        let multi = ConversionModel.message(for: WedgeError.toolFailed(tool: "ffmpeg", code: 1, message: "\n\n first line \nsecond line\nthird"))
+        #expect(multi == "ffmpeg failed: first line")
+        let long = ConversionModel.message(for: WedgeError.toolFailed(tool: "ffmpeg", code: 1, message: String(repeating: "x", count: 500)))
+        #expect(long == "ffmpeg failed: " + String(repeating: "x", count: 200) + "\u{2026}")
+    }
+
     @Test func runningStateCarriesProgressFraction() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let (model, _) = gatedModel()
         model.add([try makePNG(in: dir, name: "slow.png")])
         let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
-        let sawProgress = await waitUntil {
-            if case .running(let f) = model.items[0].state { f == 0.5 } else { false }
-        }
+        let sawProgress = await waitUntil { model.items[0].state == .running(0.5) }
         #expect(sawProgress)
+        model.cancel()
+        await run.value
+    }
+
+    @Test func progressIsRoutedToTheRightItem() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _) = gatedModel()
+        model.add([try makePNG(in: dir, name: "slowa.png"), try makePNG(in: dir, name: "slowb.png")])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        let routed = await waitUntil {
+            model.items[0].state == .running(0.25) && model.items[1].state == .running(0.75)
+        }
+        #expect(routed)
+        model.cancel()
+        await run.value
+    }
+
+    @Test func progressNeverMovesBackwards() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _) = gatedModel()
+        model.add([try makePNG(in: dir, name: "mono.png")])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        #expect(await waitUntil { model.items[0].state == .running(0.8) })
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.items[0].state == .running(0.8))
+        model.cancel()
+        await run.value
+    }
+
+    @Test func fastItemIsDoneWhileSlowItemIsStillRunning() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _) = gatedModel()
+        model.add([try makePNG(in: dir, name: "fast.png"), try makePNG(in: dir, name: "slow.png")])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        let seen = await waitUntil {
+            if case .done = model.items[0].state { model.items[1].state == .running(0.5) } else { false }
+        }
+        #expect(seen)
+        #expect(model.isConverting)
         model.cancel()
         await run.value
     }
@@ -173,14 +249,14 @@ private struct GatedConverter: Converter {
         #expect(await counter.started == 1)
     }
 
-    @Test func cancelFailsUnfinishedItemsAndKeepsFinishedOnes() async throws {
+    @Test func cancelMarksUnfinishedItemsCancelledAndKeepsFinishedOnes() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let (model, _) = gatedModel()
         model.add([try makePNG(in: dir, name: "fast.png"), try makePNG(in: dir, name: "slow.png")])
         let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
         let ready = await waitUntil {
-            model.items[0].state == .running(1) && model.items[1].state == .running(0.5)
+            if case .done = model.items[0].state { model.items[1].state == .running(0.5) } else { false }
         }
         #expect(ready)
         model.cancel()
@@ -190,10 +266,10 @@ private struct GatedConverter: Converter {
             Issue.record("finished item should stay done")
             return
         }
-        #expect(model.items[1].state == .failed("Cancelled"))
+        #expect(model.items[1].state == .cancelled)
     }
 
-    @Test func onlyPendingAndFailedItemsAreConverted() async throws {
+    @Test func onlyUnfinishedItemsAreConverted() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let (model, counter) = gatedModel()
@@ -205,6 +281,87 @@ private struct GatedConverter: Converter {
         #expect(await counter.started == 2)
         await model.convert(to: jpeg, options: ConversionOptions())
         #expect(await counter.started == 2)
+    }
+
+    @Test func doneItemIsReconvertedWhenTheTargetDiffers() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tiff = FileFormat.format(forExtension: "tiff")!
+        let model = ConversionModel()
+        model.add([try makePNG(in: dir)])
+        await model.convert(to: jpeg, options: ConversionOptions())
+        await model.convert(to: tiff, options: ConversionOptions())
+        guard case .done(let outputs, let target) = model.items[0].state else {
+            Issue.record("expected done, got \(model.items[0].state)")
+            return
+        }
+        #expect(target == tiff)
+        #expect(outputs[0].pathExtension == "tif")
+    }
+
+    @Test func failedItemCanBeRetried() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = ConversionModel()
+        model.add([dir.appendingPathComponent("later.png")])
+        await model.convert(to: jpeg, options: ConversionOptions())
+        guard case .failed = model.items[0].state else {
+            Issue.record("expected failed, got \(model.items[0].state)")
+            return
+        }
+        _ = try makePNG(in: dir, name: "later.png")
+        await model.convert(to: jpeg, options: ConversionOptions())
+        guard case .done = model.items[0].state else {
+            Issue.record("expected done after retry, got \(model.items[0].state)")
+            return
+        }
+    }
+
+    @Test func addDuringRunLeavesNewItemPendingAndOutOfTheBatch() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, counter) = gatedModel()
+        model.add([try makePNG(in: dir, name: "slow.png")])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        #expect(await waitUntil { model.isConverting })
+        model.add([try makePNG(in: dir, name: "late.png")])
+        #expect(model.items.count == 2)
+        #expect(model.items[1].state == .pending)
+        model.cancel()
+        await run.value
+        #expect(model.items[1].state == .pending)
+        #expect(await counter.started == 1)
+    }
+
+    @Test func redroppingAFinishedFileResetsItToPending() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try makePNG(in: dir)
+        let model = ConversionModel()
+        model.add([png])
+        await model.convert(to: jpeg, options: ConversionOptions())
+        model.add([png])
+        #expect(model.items.count == 1)
+        #expect(model.items[0].state == .pending)
+    }
+
+    @Test func redroppingAFailedOrCancelledFileResetsItToPending() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _) = gatedModel()
+        let bad = try makePNG(in: dir, name: "bad.png")
+        let slow = try makePNG(in: dir, name: "slow.png")
+        model.add([bad, slow])
+        let run = Task { await model.convert(to: jpeg, options: ConversionOptions()) }
+        #expect(await waitUntil {
+            if case .failed = model.items[0].state { model.items[1].state == .running(0.5) } else { false }
+        })
+        model.cancel()
+        await run.value
+        #expect(model.items[0].state == .failed("Invalid input: boom"))
+        #expect(model.items[1].state == .cancelled)
+        model.add([bad, slow])
+        #expect(model.items.map(\.state) == [.pending, .pending])
     }
 
     @Test func clearIsRefusedWhileConverting() async throws {
@@ -232,7 +389,7 @@ private struct GatedConverter: Converter {
         model.clear()
         model.add([png])
         await model.convert(to: jpeg, options: ConversionOptions())
-        guard case .done(let second) = model.items[0].state else {
+        guard case .done(let second, _) = model.items[0].state else {
             Issue.record("expected done")
             return
         }

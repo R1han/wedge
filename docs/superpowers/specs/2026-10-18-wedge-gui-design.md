@@ -6,6 +6,7 @@ Clean-room macOS GUI on top of the existing `WedgeCore` library + `wedge` CLI. O
 - Build env: **full Xcode installed locally** (CLT-only can't build a `.app`); release builds already use Xcode CI runners.
 - Order: **Phase 3 = menu-bar app shell first**, then **Phase 4 = the radial Action Wheel**.
 - The novel drag→modifier→radial-menu interaction gets a **throwaway spike first**, then Phase 4 is planned from what it teaches.
+- Wheel (decided 2026-10-22): it opens on a file drag **from anywhere** (Finder, desktop, any app), not only from the shelf; it appears only while a **modifier is held** during the drag, so ordinary drags are untouched; default rings **⇧ Conversions, ⌘ Tools, ⌃ Actions**, remappable in Settings. The shelf stays as the permission-free path.
 
 ## Constraints
 - macOS 13+, Swift 6. SwiftUI for views; an AppKit `NSView`/`NSWindow` layer for the drag source + overlay (SwiftUI can't read modifier keys mid-drag — confirmed by RE).
@@ -17,16 +18,16 @@ Clean-room macOS GUI on top of the existing `WedgeCore` library + `wedge` CLI. O
 
 ## Architecture
 - `WedgeApp` (SwiftUI `App`, `MenuBarExtra`) — lifecycle, menu-bar menu, opens windows.
-- `ConversionModel` (`@MainActor @Observable`) — wraps `ConversionService`; holds the item queue, per-item progress, results; actions addFiles/convert/cancel. The testable heart of the UI.
+- `ConversionModel` (`@MainActor` `ObservableObject`; `@Observable` needs macOS 14) — wraps `ConversionService`; holds the item queue, per-item progress, results; actions addFiles/convert/cancel. The testable heart of the UI.
 - Floating file **shelf** window — drag-drop import, file chips, target-format picker (from `registry.pairs()`), options, Convert, progress, reveal outputs.
-- **Settings** window — default format, output policy, Launch-at-Login (via a mockable `LoginItemService` over `SMAppService`), persisted with `@AppStorage`.
+- **Settings** window — default format, output policy, Launch-at-Login (via a mockable `LoginItemService` over `SMAppService`), persisted by a `SettingsModel` over `UserDefaults`.
 - `LoginItemService` — protocol + real (`SMAppService.mainApp`) + fake for tests.
 
 ## Phase 3 scope (menu-bar app shell) — see the Phase 3 plan
 App scaffold (xcodegen) · ConversionModel · floating shelf with drag-drop + convert + progress · Settings + Launch-at-Login · menu-bar menu/lifecycle · CI app-build check.
 
 ## Phase 4 overview (Action Wheel) — planned after the spike
-A transparent overlay window renders a radial menu while a file is dragged from the shelf. The held modifier combination selects the ring — Conversions (⇧), Tools (⌘), Actions (⌃) — each a remappable `ModifierCombination` in `@AppStorage`. Release over a segment runs it. Plus the RE-identified improvements: drag-time hint overlay, first-run tutorial, a hotkey/menu-bar way to open it, keyboard + VoiceOver access, batch, presets, watch folders. (Advanced "tools" ring — compress/crop/trim/split/merge — reuses WedgeCore + qpdf; some are new WedgeCore ops added alongside.)
+A transparent overlay window renders a radial menu while a file is dragged from anywhere on the system (or from the shelf) and a modifier is held. The held modifier combination selects the ring — Conversions (⇧), Tools (⌘), Actions (⌃) — each a remappable `ModifierCombination` persisted in settings. Watching drags that start in other apps needs a system-wide drag/event watcher; Wedge asks for the Accessibility permission on first use with an explanation, and without it the wheel still works for drags from the shelf. Release over a segment runs it. Plus the RE-identified improvements: drag-time hint overlay, first-run tutorial, a hotkey/menu-bar way to open it, keyboard + VoiceOver access, batch, presets, watch folders. (Advanced "tools" ring — compress/crop/trim/split/merge — reuses WedgeCore + qpdf; some are new WedgeCore ops added alongside.)
 
 ## Wheel spike (throwaway, built once Xcode is in)
 Goal: prove feasibility + feel of the three hard parts before committing the Phase 4 plan.
@@ -34,7 +35,9 @@ Goal: prove feasibility + feel of the three hard parts before committing the Pha
 - A borderless, transparent, click-through overlay `NSWindow` that renders a radial menu and follows the cursor during the drag.
 - A local/global event monitor reading `NSEvent.modifierFlags` live to switch the active ring label (⇧/⌘/⌃).
 - On drop, hit-test the cursor position to the nearest segment and log the choice.
+- Detect a drag that starts in **Finder** (not our own session) plus a held modifier, show the overlay over it, and receive the dropped file URLs on release. Record which permission this needs (Accessibility, Input Monitoring) and how the prompt looks.
+- Check whether holding ⌘ (or ⌥) during a Finder drag clashes with Finder's own move/copy behaviour; if ⌘ clashes, propose an alternative default for the Tools ring.
 Deliverable: a short note on what worked, timing/jank, permission prompts (if any), and the chosen rendering approach — feeds the Phase 4 plan. The spike is discarded; keeping any of it comes back through brainstorming.
 
 ## Non-goals (GUI phases)
-Not iOS; no cloud/account/telemetry; no paywall. Not notarized on day one (ad-hoc signed; Gatekeeper right-click-open until Developer ID). The wheel does not require Accessibility permission (the drag originates from our own shelf, so we own the session).
+Not iOS; no cloud/account/telemetry; no paywall. Not notarized on day one (ad-hoc signed; Gatekeeper right-click-open until Developer ID). Drags from the shelf need no special permission (we own the session); drags from other apps need the permission the spike identifies, requested only when the user turns that on.

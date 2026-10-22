@@ -138,6 +138,10 @@ struct ShelfView: View {
         .padding(12)
     }
 
+    private var outputMenuTitle: String {
+        outputDirectory.map { "Save to \($0.lastPathComponent)" } ?? "Save next to originals"
+    }
+
     private var outputMenu: some View {
         Menu {
             Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in choices.output = .nextToOriginals }))
@@ -146,10 +150,11 @@ struct ShelfView: View {
                 isOn: Binding(get: { outputDirectory != nil }, set: { _ in chooseOutputFolder() })
             )
         } label: {
-            Text(outputDirectory.map { "Save to \($0.lastPathComponent)" } ?? "Save next to originals")
+            Text(outputMenuTitle)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityLabel(outputMenuTitle)
         .help(outputDirectory?.path ?? "Converted files are saved next to the originals")
         .disabled(model.isConverting)
     }
@@ -174,6 +179,7 @@ struct ShelfView: View {
                 TextField("Max size (px)", text: $maxDimensionText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
+                    .accessibilityLabel("Max size (px)")
                     .onChange(of: maxDimensionText) { text in
                         let digits = text.filter { $0.isASCII && $0.isNumber }
                         if digits != text { maxDimensionText = digits }
@@ -261,7 +267,7 @@ private struct ShelfRow: View {
             if case .done(let outputs, _) = item.state, !outputs.isEmpty {
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(outputs) }
                     .controlSize(.small)
-                    .accessibilityHint("Output of \(item.url.lastPathComponent)")
+                    .accessibilityLabel("Reveal in Finder, \(item.url.lastPathComponent)")
             }
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")

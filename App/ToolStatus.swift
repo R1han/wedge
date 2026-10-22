@@ -26,8 +26,11 @@ final class ToolStatusModel: ObservableObject {
     init() {
         NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        ) { [weak self] note in
+            nonisolated(unsafe) let note = note
+            MainActor.assumeIsolated {
+                if let menu = note.object as? NSMenu, MenuBarContent.isWedgeMenu(menu) { self?.refresh() }
+            }
         }
     }
 

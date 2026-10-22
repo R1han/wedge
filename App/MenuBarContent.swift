@@ -4,7 +4,7 @@ struct MenuBarContent: View {
     @ObservedObject var tools: ToolStatusModel
 
     var body: some View {
-        Button("Open Shelf") {
+        Button(Self.openShelfTitle) {
             ShelfWindowController.shared.show()
         }
         .keyboardShortcut("o")
@@ -13,7 +13,7 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut(",")
         Divider()
-        Section("Tools") {
+        Menu("Tools") {
             ForEach(tools.statuses, id: \.tool.name) { status in
                 Text(status.menuTitle)
             }
@@ -23,5 +23,12 @@ struct MenuBarContent: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    static let openShelfTitle = "Open Shelf"
+
+    /// Whether a tracked menu is the menu-bar menu above, as opposed to some other popup.
+    static func isWedgeMenu(_ menu: NSMenu) -> Bool {
+        menu.items.contains { $0.title == openShelfTitle }
     }
 }

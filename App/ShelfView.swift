@@ -10,37 +10,27 @@ struct ShelfView: View {
     @ObservedObject var model: ConversionModel
     @ObservedObject var settings: SettingsModel
 
-    @State private var selectedTarget: FileFormat?
+    @State private var choices = ShelfChoices()
     @State private var quality = 0.8
     @State private var stripMetadata = false
     @State private var maxDimensionText = ""
     @State private var replaceExisting = false
-    /// A folder picked in the shelf for this session; nil follows the saved setting.
-    @State private var outputOverride: OutputOverride?
     @State private var isDropTargeted = false
 
     private var target: FileFormat? {
-        if let selectedTarget, model.targets.contains(selectedTarget) { return selectedTarget }
+        if let selected = choices.target, model.targets.contains(selected) { return selected }
         return settings.preferredTarget(among: model.targets) ?? model.targets.first
     }
 
-    private enum OutputOverride { case nextToOriginals, folder(URL) }
-
-    private var outputDirectory: URL? {
-        switch outputOverride {
-        case .nextToOriginals: nil
-        case .folder(let url): settings.directoryExists(url) ? url : nil
-        case nil: settings.resolvedOutputDirectory
+    private var resolvedOutput: (url: URL?, note: String?) {
+        switch choices.output {
+        case .nextToOriginals: (nil, nil)
+        case .folder(let url): settings.resolveOutputFolder(url)
+        case nil: settings.resolveOutputFolder()
         }
     }
 
-    private var outputNote: String? {
-        switch outputOverride {
-        case .nextToOriginals: nil
-        case .folder(let url): settings.directoryExists(url) ? nil : "The chosen folder no longer exists. Files are saved next to the originals."
-        case nil: settings.outputFolderNote
-        }
-    }
+    private var outputDirectory: URL? { resolvedOutput.url }
 
     private var hasConvertibleItems: Bool { model.items.contains(where: \.isConvertible) }
     private var noCommonFormat: Bool { hasConvertibleItems && model.targets.isEmpty }
@@ -58,6 +48,8 @@ struct ShelfView: View {
             footer
         }
         .frame(minWidth: 420, minHeight: 320)
+        .onChange(of: model.items.isEmpty) { choices.itemsChanged(isEmpty: $0) }
+        .onChange(of: settings.outputFolder) { _ in choices.savedFolderChanged() }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             Task { model.addDropped(await DropHandler.urls(from: providers)) }
             return true
@@ -102,11 +94,7 @@ struct ShelfView: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
-            if let outputNote {
-                Text(outputNote)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-            }
+            if let note = resolvedOutput.note { NoticeText(text: note) }
             if noCommonFormat {
                 Text("These files have no common format \u{2014} remove some to continue")
                     .font(.callout)
@@ -117,7 +105,7 @@ struct ShelfView: View {
                     Text("No format available")
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("Convert to", selection: Binding(get: { target }, set: { selectedTarget = $0 })) {
+                    Picker("Convert to", selection: Binding(get: { target }, set: { choices.target = $0 })) {
                         ForEach(model.targets, id: \.id) { format in
                             Text(format.id.uppercased()).tag(Optional(format))
                         }
@@ -156,7 +144,7 @@ struct ShelfView: View {
 
     private var outputMenu: some View {
         Menu {
-            Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in outputOverride = .nextToOriginals }))
+            Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in choices.output = .nextToOriginals }))
             Toggle(
                 outputDirectory.map { "Folder: \($0.lastPathComponent)" } ?? "Choose folder\u{2026}",
                 isOn: Binding(get: { outputDirectory != nil }, set: { _ in chooseOutputFolder() })
@@ -234,7 +222,7 @@ struct ShelfView: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        present(panel) { panel.url.map { outputOverride = .folder($0) } }
+        present(panel) { panel.url.map { choices.output = .folder($0) } }
     }
 
     /// Shows the panel as a sheet on the shelf (or free-standing if it has no window), without blocking the run loop.

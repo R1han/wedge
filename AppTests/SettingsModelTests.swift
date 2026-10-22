@@ -64,6 +64,53 @@ import WedgeCore
         #expect(model.launchAtLogin == .enabled)
     }
 
+    @Test func errorIsDroppedWhenTheStatusAlreadyMatchesTheRequest() {
+        let service = FakeLoginItemService()
+        let model = makeModel(service: service)
+        service.failNext(statusBecomes: .enabled)
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLogin == .enabled)
+        #expect(model.launchAtLoginError == nil)
+    }
+
+    @Test func errorIsKeptWhenTheStatusStillDiffers() {
+        let service = FakeLoginItemService()
+        let model = makeModel(service: service)
+        service.failNext(statusBecomes: .disabled)
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLoginError != nil)
+    }
+
+    @Test func refreshClearsAStaleError() {
+        let service = FakeLoginItemService()
+        let model = makeModel(service: service)
+        service.failNext()
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLoginError != nil)
+        model.refreshLaunchAtLogin()
+        #expect(model.launchAtLoginError == nil)
+    }
+
+    @Test func enablingWhilePendingApprovalShowsNoFalseError() {
+        let service = FakeLoginItemService(status: .requiresApproval)
+        let model = makeModel(service: service)
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLogin == .requiresApproval)
+        #expect(model.launchAtLoginError == nil)
+    }
+
+    @Test func notFoundKeepsEnablingPossibleAndSurfacesTheRealError() {
+        let service = FakeLoginItemService(status: .notFound)
+        let model = makeModel(service: service)
+        #expect(model.launchAtLogin == .notFound)
+        service.failNext()
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLogin == .notFound)
+        #expect(model.launchAtLoginError?.contains("Operation not permitted") == true)
+        model.setLaunchAtLogin(true)
+        #expect(model.launchAtLogin == .enabled)
+    }
+
     @Test func statusIsReReadAfterSetNotAssumed() {
         let service = FakeLoginItemService()
         service.enableResult(.requiresApproval)
@@ -83,9 +130,9 @@ import WedgeCore
     }
 
     @Test func refreshPicksUpChangesMadeOutsideTheApp() throws {
-        let service = FakeLoginItemService(status: .requiresApproval)
+        let service = FakeLoginItemService()
         let model = makeModel(service: service)
-        #expect(model.launchAtLogin == .requiresApproval)
+        #expect(model.launchAtLogin == .disabled)
         try service.setEnabled(true)
         model.refreshLaunchAtLogin()
         #expect(model.launchAtLogin == .enabled)
@@ -126,14 +173,15 @@ import WedgeCore
         #expect(makeModel(defaults: defaults).defaultFormat == nil)
     }
 
-    // MARK: Output folder fallback
+    // MARK: Output folder resolution
 
     @Test func existingFolderIsUsed() throws {
         let folder = try makeTempDir()
         let model = makeModel()
         model.setOutputFolder(folder)
-        #expect(model.resolvedOutputDirectory?.path == folder.path)
-        #expect(model.outputFolderNote == nil)
+        let resolved = model.resolveOutputFolder()
+        #expect(resolved.url?.path == folder.path)
+        #expect(resolved.note == nil)
     }
 
     @Test func missingFolderFallsBackToNextToOriginalsWithNote() throws {
@@ -141,8 +189,9 @@ import WedgeCore
         let model = makeModel()
         model.setOutputFolder(folder)
         try FileManager.default.removeItem(at: folder)
-        #expect(model.resolvedOutputDirectory == nil)
-        #expect(model.outputFolderNote?.contains(folder.lastPathComponent) == true)
+        let resolved = model.resolveOutputFolder()
+        #expect(resolved.url == nil)
+        #expect(resolved.note?.contains(folder.lastPathComponent) == true)
     }
 
     @Test func aFileInPlaceOfTheFolderIsNotUsed() throws {
@@ -151,14 +200,36 @@ import WedgeCore
         try Data().write(to: file)
         let model = makeModel()
         model.setOutputFolder(file)
-        #expect(model.resolvedOutputDirectory == nil)
-        #expect(model.outputFolderNote != nil)
+        let resolved = model.resolveOutputFolder()
+        #expect(resolved.url == nil)
+        #expect(resolved.note != nil)
+    }
+
+    @Test func aFolderThatIsNotWritableFallsBackWithNote() throws {
+        let folder = try makeTempDir()
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        let model = makeModel()
+        model.setOutputFolder(folder)
+        let resolved = model.resolveOutputFolder()
+        #expect(resolved.url == nil)
+        #expect(resolved.note?.contains("writable") == true)
     }
 
     @Test func noFolderMeansNextToOriginalsWithoutNote() {
+        let resolved = makeModel().resolveOutputFolder()
+        #expect(resolved.url == nil)
+        #expect(resolved.note == nil)
+    }
+
+    @Test func aSessionFolderIsResolvedTheSameWay() throws {
+        let folder = try makeTempDir()
         let model = makeModel()
-        #expect(model.resolvedOutputDirectory == nil)
-        #expect(model.outputFolderNote == nil)
+        #expect(model.resolveOutputFolder(folder).url?.path == folder.path)
+        try FileManager.default.removeItem(at: folder)
+        let resolved = model.resolveOutputFolder(folder)
+        #expect(resolved.url == nil)
+        #expect(resolved.note != nil)
     }
 
     // MARK: Shelf initial selection

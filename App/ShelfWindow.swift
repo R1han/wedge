@@ -25,7 +25,7 @@ final class ShelfWindowController {
         let panel = panel ?? makePanel()
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.bringToFront()
     }
 
     private func makePanel() -> NSPanel {

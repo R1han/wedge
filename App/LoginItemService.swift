@@ -6,7 +6,8 @@ enum LoginItemStatus: Equatable, Sendable {
     case disabled
     /// Registered, but the user has to allow it in System Settings, Login Items.
     case requiresApproval
-    case unavailable(String)
+    /// The system cannot find the login item (often a build outside /Applications). Enabling is still attempted.
+    case notFound
 }
 
 protocol LoginItemService: Sendable {
@@ -21,7 +22,7 @@ struct SMLoginItemService: LoginItemService {
     func setEnabled(_ enabled: Bool) throws {
         let service = SMAppService.mainApp
         if enabled {
-            if service.status != .enabled { try service.register() }
+            if service.status != .enabled && service.status != .requiresApproval { try service.register() }
         } else if service.status == .enabled || service.status == .requiresApproval {
             try service.unregister()
         }
@@ -36,8 +37,8 @@ struct SMLoginItemService: LoginItemService {
         case .enabled: .enabled
         case .notRegistered: .disabled
         case .requiresApproval: .requiresApproval
-        case .notFound: .unavailable("Wedge could not be found as a login item. Move it to the Applications folder and reopen it.")
-        @unknown default: .unavailable("Launch at Login is not available on this system.")
+        case .notFound: .notFound
+        @unknown default: .disabled
         }
     }
 }

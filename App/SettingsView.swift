@@ -18,6 +18,27 @@ private extension FormatCategory {
     static let displayOrder: [FormatCategory] = [.image, .document, .audio, .video, .archive, .data, .other]
 }
 
+/// A message with an icon, so its meaning does not rest on colour alone.
+struct NoticeText: View {
+    enum Kind { case warning, error }
+
+    let text: String
+    var kind: Kind = .warning
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: kind == .error ? "xmark.octagon" : "exclamationmark.triangle")
+                .foregroundStyle(kind == .error ? .red : .orange)
+                .accessibilityLabel(kind == .error ? "Error" : "Warning")
+            Text(text)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.callout)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var settings: SettingsModel
 
@@ -41,7 +62,6 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .accessibilityLabel("Default format")
                 .help("Used when a batch can be converted to it; otherwise the first available format is selected")
 
                 outputRow
@@ -49,39 +69,35 @@ struct SettingsView: View {
             Section("Launch at Login") { launchRow }
         }
         .formStyle(.grouped)
+        .scrollDisabled(true)
         .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             settings.refreshLaunchAtLogin()
         }
     }
 
     private var outputRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let resolved = settings.resolveOutputFolder()
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Save converted files")
                 Spacer()
-                Text(settings.outputFolder.map { $0.path } ?? "Next to originals")
+                Text(settings.outputFolder?.path ?? "Next to originals")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 200, alignment: .trailing)
-                    .accessibilityLabel("Output location")
-                    .accessibilityValue(settings.outputFolder?.path ?? "Next to originals")
             }
+            .accessibilityElement(children: .combine)
             HStack {
                 Spacer()
                 if settings.outputFolder != nil {
                     Button("Use Next to Originals") { settings.setOutputFolder(nil) }
-                        .accessibilityLabel("Save converted files next to the originals")
                 }
                 Button("Choose Folder\u{2026}", action: chooseFolder)
-                    .accessibilityLabel("Choose output folder")
             }
-            if let note = settings.outputFolderNote {
-                Text(note)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-            }
+            if let note = resolved.note { NoticeText(text: note) }
         }
     }
 
@@ -92,32 +108,18 @@ struct SettingsView: View {
             get: { status == .enabled || status == .requiresApproval },
             set: { settings.setLaunchAtLogin($0) }
         ))
-        .disabled(isUnavailable(status))
-        .accessibilityLabel("Launch at login")
         if status == .requiresApproval {
             VStack(alignment: .leading, spacing: 6) {
-                Text("macOS needs your approval before Wedge can open at login.")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                NoticeText(text: "macOS needs your approval before Wedge can open at login.")
                 Button("Open Login Items Settings", action: settings.openLoginItemsSettings)
-                    .accessibilityLabel("Open Login Items Settings")
             }
         }
-        if case .unavailable(let reason) = status {
-            Text(reason)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        if status == .notFound {
+            NoticeText(text: "macOS can\u{2019}t find Wedge as a login item yet. If turning this on fails, move Wedge to the Applications folder and reopen it.")
         }
         if let error = settings.launchAtLoginError {
-            Text(error)
-                .font(.callout)
-                .foregroundStyle(.red)
+            NoticeText(text: error, kind: .error)
         }
-    }
-
-    private func isUnavailable(_ status: LoginItemStatus) -> Bool {
-        if case .unavailable = status { return true }
-        return false
     }
 
     private func chooseFolder() {

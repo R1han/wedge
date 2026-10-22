@@ -48,24 +48,29 @@ final class SettingsModel: ObservableObject {
         defaultFormat.flatMap { available.contains($0) ? $0 : nil }
     }
 
-    /// The saved folder if it still exists, else nil (next to the originals).
-    var resolvedOutputDirectory: URL? {
-        outputFolder.flatMap { directoryExists($0) ? $0 : nil }
+    /// Resolves the saved folder: the folder to use (nil means next to the originals) and, when the
+    /// folder had to be dropped, a note saying why.
+    func resolveOutputFolder() -> (url: URL?, note: String?) {
+        outputFolder.map(resolveOutputFolder) ?? (nil, nil)
     }
 
-    /// Explains why the saved folder is not being used; nil when it is fine or none is set.
-    var outputFolderNote: String? {
-        guard let folder = outputFolder, !directoryExists(folder) else { return nil }
-        return "The folder \u{201C}\(folder.lastPathComponent)\u{201D} no longer exists. Files are saved next to the originals."
-    }
-
-    func directoryExists(_ url: URL) -> Bool {
+    /// Same rule for a folder chosen in the shelf for one session.
+    func resolveOutputFolder(_ folder: URL) -> (url: URL?, note: String?) {
+        let name = "\u{201C}\(folder.lastPathComponent)\u{201D}"
         var isDirectory: ObjCBool = false
-        return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        guard fileManager.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return (nil, "The folder \(name) no longer exists. Files are saved next to the originals.")
+        }
+        guard fileManager.isWritableFile(atPath: folder.path) else {
+            return (nil, "The folder \(name) is not writable. Files are saved next to the originals.")
+        }
+        return (folder, nil)
     }
 
+    /// The status describes the system, so it replaces any message about an earlier attempt.
     func refreshLaunchAtLogin() {
         launchAtLogin = loginItems.status
+        launchAtLoginError = nil
     }
 
     /// Applies the request, then shows what the system actually reports. A failure is published, never swallowed.
@@ -77,6 +82,15 @@ final class SettingsModel: ObservableObject {
             launchAtLoginError = "Couldn\u{2019}t turn Launch at Login \(enabled ? "on" : "off"): \(error.localizedDescription)"
         }
         launchAtLogin = loginItems.status
+        if Self.satisfies(launchAtLogin, enabled: enabled) { launchAtLoginError = nil }
+    }
+
+    /// Whether the system status is already what the user asked for (so a thrown error was a race, not a failure).
+    private static func satisfies(_ status: LoginItemStatus, enabled: Bool) -> Bool {
+        switch status {
+        case .enabled, .requiresApproval: enabled
+        case .disabled, .notFound: !enabled
+        }
     }
 
     func openLoginItemsSettings() {

@@ -66,11 +66,11 @@
 ## Task 5: Menu-bar menu + lifecycle
 **Files:** Modify `App/WedgeApp.swift`; Create `App/MenuBarContent.swift`.
 **Interfaces:** MenuBarExtra menu: Open Shelf, Settings…, a Tools status line (pandoc/ffmpeg found? via ToolLocator), Quit. Single-instance focus (re-activate existing shelf). First-run opens the shelf once.
-- [ ] Step 1: (logic) a `ToolStatus` helper (reuse ToolLocator) with a test that it reports found/missing for a known + nonsense tool.
-- [ ] Step 2: run → FAIL.
-- [ ] Step 3: Implement menu + lifecycle + ToolStatus.
-- [ ] Step 4: test → PASS; app builds; manual: menu opens shelf/settings, shows tool status (note in report).
-- [ ] Step 5: Commit `feat: add menu-bar menu and app lifecycle`.
+- [x] Step 1: (logic) a `ToolStatus` helper (reuse ToolLocator) with a test that it reports found/missing for a known + nonsense tool.
+- [x] Step 2: run → FAIL.
+- [x] Step 3: Implement menu + lifecycle + ToolStatus.
+- [x] Step 4: test → PASS; app builds; manual: menu opens shelf/settings, shows tool status (note in report).
+- [x] Step 5: Commit `feat: add menu-bar menu and app lifecycle`.
 
 ## Task 6: CI app-build check + docs
 **Files:** Modify `.github/workflows/ci.yml` (add an app-build job), `README.md` (document the app).

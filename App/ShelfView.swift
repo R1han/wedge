@@ -90,15 +90,11 @@ struct ShelfView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let notice = model.notice {
-                Text(notice)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                NoticeText(text: notice)
             }
             if let note = resolvedOutput.note { NoticeText(text: note) }
             if noCommonFormat {
-                Text("These files have no common format \u{2014} remove some to continue")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                NoticeText(text: "These files have no common format \u{2014} remove some to continue")
             }
             HStack {
                 if model.targets.isEmpty {
@@ -156,7 +152,6 @@ struct ShelfView: View {
         .fixedSize()
         .help(outputDirectory?.path ?? "Converted files are saved next to the originals")
         .disabled(model.isConverting)
-        .accessibilityLabel("Output location")
     }
 
     private func imageOptions(for target: FileFormat) -> some View {
@@ -183,7 +178,6 @@ struct ShelfView: View {
                         let digits = text.filter { $0.isASCII && $0.isNumber }
                         if digits != text { maxDimensionText = digits }
                     }
-                    .accessibilityLabel("Maximum dimension in pixels")
             }
             if maxDimensionIsInvalid {
                 Text("Enter a whole number from \(MaxDimensionInput.range.lowerBound) to \(MaxDimensionInput.range.upperBound).")
@@ -267,7 +261,7 @@ private struct ShelfRow: View {
             if case .done(let outputs, _) = item.state, !outputs.isEmpty {
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(outputs) }
                     .controlSize(.small)
-                    .accessibilityLabel("Reveal \(item.url.lastPathComponent) output in Finder")
+                    .accessibilityHint("Output of \(item.url.lastPathComponent)")
             }
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")

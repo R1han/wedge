@@ -53,8 +53,8 @@ public struct PandocConverter: Converter {
         guard let toName = Self.writerNames[request.target.id], source.id != request.target.id else {
             throw WedgeError.unsupportedConversion(from: source.id, to: request.target.id)
         }
-        guard let pandoc = locator("pandoc") else {
-            throw WedgeError.toolNotInstalled(tool: "pandoc", installHint: "brew install pandoc")
+        guard let pandoc = locator(ExternalTool.pandoc.name) else {
+            throw WedgeError.toolNotInstalled(tool: ExternalTool.pandoc.name, installHint: ExternalTool.pandoc.installHint)
         }
         progress(0.0)
 

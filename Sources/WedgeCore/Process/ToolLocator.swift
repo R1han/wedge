@@ -1,5 +1,20 @@
 import Foundation
 
+/// An external command-line tool the converters depend on, with the hint shown when it is missing.
+public struct ExternalTool: Sendable, Equatable {
+    public let name: String
+    public let installHint: String
+
+    public init(name: String, installHint: String) {
+        self.name = name
+        self.installHint = installHint
+    }
+
+    public static let pandoc = ExternalTool(name: "pandoc", installHint: "brew install pandoc")
+    public static let ffmpeg = ExternalTool(name: "ffmpeg", installHint: "brew install ffmpeg")
+    public static let all: [ExternalTool] = [.pandoc, .ffmpeg]
+}
+
 /// Locates external command-line tools. GUI apps inherit a minimal `PATH`, so the
 /// common Homebrew prefixes are searched in addition to `$PATH`.
 public struct ToolLocator: Sendable {

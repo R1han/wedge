@@ -57,8 +57,8 @@ public struct MediaConverter: Converter {
         guard supports(from: source, to: request.target) else {
             throw WedgeError.unsupportedConversion(from: source.id, to: request.target.id)
         }
-        guard let ffmpeg = locator("ffmpeg") else {
-            throw WedgeError.toolNotInstalled(tool: "ffmpeg", installHint: "brew install ffmpeg")
+        guard let ffmpeg = locator(ExternalTool.ffmpeg.name) else {
+            throw WedgeError.toolNotInstalled(tool: ExternalTool.ffmpeg.name, installHint: ExternalTool.ffmpeg.installHint)
         }
         progress(0.0)
 

@@ -4,7 +4,6 @@ import WedgeCore
 
 private extension FileFormat {
     var isImage: Bool { category == .image }
-    var isLossyImage: Bool { isImage && ["jpeg", "heic", "webp"].contains(id) }
 }
 
 struct ShelfView: View {
@@ -25,7 +24,12 @@ struct ShelfView: View {
 
     private var hasConvertibleItems: Bool { model.items.contains(where: \.isConvertible) }
     private var noCommonFormat: Bool { hasConvertibleItems && model.targets.isEmpty }
-    private var canConvert: Bool { target.map(model.hasWork(for:)) ?? false }
+    private var maxDimension: MaxDimensionInput { MaxDimensionInput.parse(maxDimensionText) }
+    private var maxDimensionIsInvalid: Bool {
+        guard let target, target.isImage else { return false }
+        return maxDimension == .invalid
+    }
+    private var canConvert: Bool { !maxDimensionIsInvalid && (target.map(model.hasWork(for:)) ?? false) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,7 +39,7 @@ struct ShelfView: View {
         }
         .frame(minWidth: 420, minHeight: 320)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-            Task { model.add(await DropHandler.urls(from: providers)) }
+            Task { model.addDropped(await DropHandler.urls(from: providers)) }
             return true
         }
     }
@@ -73,25 +77,40 @@ struct ShelfView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
             if noCommonFormat {
                 Text("These files have no common format \u{2014} remove some to continue")
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
             HStack {
-                Picker("Convert to", selection: Binding(get: { target }, set: { selectedTarget = $0 })) {
-                    ForEach(model.targets, id: \.id) { format in
-                        Text(format.id.uppercased()).tag(Optional(format))
+                if model.targets.isEmpty {
+                    Text("No format available")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Convert to", selection: Binding(get: { target }, set: { selectedTarget = $0 })) {
+                        ForEach(model.targets, id: \.id) { format in
+                            Text(format.id.uppercased()).tag(Optional(format))
+                        }
                     }
+                    .frame(maxWidth: 200)
+                    .disabled(model.isConverting)
                 }
-                .frame(maxWidth: 200)
-                .disabled(model.targets.isEmpty || model.isConverting)
                 Spacer()
                 outputMenu
             }
             if let target, target.isImage { imageOptions(for: target) }
             Toggle("Replace existing files", isOn: $replaceExisting)
                 .disabled(model.isConverting)
+            if replaceExisting {
+                Text("Files with the same name will be overwritten.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Add Files\u{2026}", action: addFiles)
                     .disabled(model.isConverting)
@@ -112,20 +131,24 @@ struct ShelfView: View {
 
     private var outputMenu: some View {
         Menu {
-            Button("Next to originals") { outputDirectory = nil }
-            Button("Choose folder\u{2026}", action: chooseOutputFolder)
+            Toggle("Next to originals", isOn: Binding(get: { outputDirectory == nil }, set: { _ in outputDirectory = nil }))
+            Toggle(
+                outputDirectory.map { "Folder: \($0.lastPathComponent)" } ?? "Choose folder\u{2026}",
+                isOn: Binding(get: { outputDirectory != nil }, set: { _ in chooseOutputFolder() })
+            )
         } label: {
             Text(outputDirectory.map { "Save to \($0.lastPathComponent)" } ?? "Save next to originals")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .help(outputDirectory?.path ?? "Converted files are saved next to the originals")
         .disabled(model.isConverting)
         .accessibilityLabel("Output location")
     }
 
     private func imageOptions(for target: FileFormat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if target.isLossyImage {
+            if target.supportsQuality {
                 HStack {
                     Text("Quality")
                     Slider(value: $quality, in: 0...1)
@@ -143,7 +166,16 @@ struct ShelfView: View {
                 TextField("Max size (px)", text: $maxDimensionText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
+                    .onChange(of: maxDimensionText) { text in
+                        let digits = text.filter { $0.isASCII && $0.isNumber }
+                        if digits != text { maxDimensionText = digits }
+                    }
                     .accessibilityLabel("Maximum dimension in pixels")
+            }
+            if maxDimensionIsInvalid {
+                Text("Enter a whole number from \(MaxDimensionInput.range.lowerBound) to \(MaxDimensionInput.range.upperBound).")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
         .disabled(model.isConverting)
@@ -151,10 +183,11 @@ struct ShelfView: View {
 
     private func convert() {
         guard let target else { return }
-        let maxDimension = Int(maxDimensionText.trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? $0 : nil }
+        var limit: Int?
+        if target.isImage, case .valid(let value) = maxDimension { limit = value }
         let options = ConversionOptions(
-            quality: target.isLossyImage ? quality : nil,
-            maxDimension: target.isImage ? maxDimension : nil,
+            quality: target.supportsQuality ? quality : nil,
+            maxDimension: limit,
             stripMetadata: target.isImage && stripMetadata,
             force: replaceExisting
         )
@@ -167,7 +200,7 @@ struct ShelfView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        if panel.runModal() == .OK { model.add(panel.urls) }
+        present(panel) { model.add(panel.urls) }
     }
 
     private func chooseOutputFolder() {
@@ -176,7 +209,19 @@ struct ShelfView: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK { outputDirectory = panel.url }
+        present(panel) { outputDirectory = panel.url }
+    }
+
+    /// Shows the panel as a sheet on the shelf (or free-standing if it has no window), without blocking the run loop.
+    private func present(_ panel: NSOpenPanel, onOK: @escaping () -> Void) {
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK { onOK() }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
+        }
     }
 }
 
@@ -185,13 +230,16 @@ private struct ShelfRow: View {
     let canRemove: Bool
     let onRemove: () -> Void
 
+    @State private var icon: NSImage?
+
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                Image(nsImage: icon ?? NSImage())
                     .resizable()
                     .frame(width: 32, height: 32)
                     .accessibilityHidden(true)
+                    .onAppear { if icon == nil { icon = NSWorkspace.shared.icon(forFile: item.url.path) } }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.url.lastPathComponent)
                         .lineLimit(1)
@@ -203,7 +251,7 @@ private struct ShelfRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(item.url.lastPathComponent), \(Self.description(of: item.state))")
             Spacer()
-            if case .done(let outputs, _) = item.state {
+            if case .done(let outputs, _) = item.state, !outputs.isEmpty {
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(outputs) }
                     .controlSize(.small)
                     .accessibilityLabel("Reveal \(item.url.lastPathComponent) output in Finder")

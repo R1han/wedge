@@ -15,4 +15,9 @@ import Testing
         #expect(ids.contains("heic"))
         #expect(ids.contains("zip"))
     }
+
+    @Test func test_supportsQuality_isTrueOnlyForFormatsTheImageConverterAppliesItTo() {
+        let ids = FileFormat.known.filter(\.supportsQuality).map(\.id)
+        #expect(Set(ids) == ["jpeg", "heic"])
+    }
 }

@@ -489,6 +489,32 @@ private struct GatedConverter: Converter {
         #expect(model.items.count == 1)
     }
 
+    @Test func addingAFolderIsConvertibleToAnArchive() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("stuff")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data([1]).write(to: folder.appendingPathComponent("a.txt"))
+        let model = ConversionModel()
+        model.add([folder])
+        #expect(model.items[0].isConvertible)
+        #expect(model.items[0].state == .pending)
+        #expect(model.targets.contains { $0.id == "zip" })
+    }
+
+    @Test func dropWithNoFileURLsSetsNoticeUntilNextSuccessfulAdd() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = ConversionModel()
+        #expect(model.notice == nil)
+        model.addDropped([])
+        #expect(model.notice == "Only files and folders can be added")
+        #expect(model.items.isEmpty)
+        model.addDropped([try makePNG(in: dir)])
+        #expect(model.notice == nil)
+        #expect(model.items.count == 1)
+    }
+
     @Test func removeIsRefusedWhileConverting() async throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

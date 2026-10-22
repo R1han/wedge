@@ -22,6 +22,21 @@ import UniformTypeIdentifiers
         #expect(await DropHandler.urls(from: [provider]) == [a])
     }
 
+    @Test func fileURLStringDeliveredAsDataIsReturned() async {
+        let data = Data("file:///tmp/from-data.png".utf8)
+        let provider = NSItemProvider(item: data as NSData, typeIdentifier: UTType.fileURL.identifier)
+        #expect(await DropHandler.urls(from: [provider]) == [URL(fileURLWithPath: "/tmp/from-data.png")])
+    }
+
+    @Test func providerWhoseLoadFailsIsIgnored() async {
+        let failing = NSItemProvider()
+        failing.registerItem(forTypeIdentifier: UTType.fileURL.identifier) { completion, _, _ in
+            completion?(nil, CocoaError(.fileReadUnknown))
+        }
+        let a = URL(fileURLWithPath: "/tmp/a.png")
+        #expect(await DropHandler.urls(from: [failing, fileProvider(a)]) == [a])
+    }
+
     @Test func nonFileProvidersAreIgnored() async {
         let text = NSItemProvider(object: "hello" as NSString)
         let web = NSItemProvider(item: URL(string: "https://example.com/x.png")! as NSURL, typeIdentifier: UTType.url.identifier)

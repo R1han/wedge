@@ -31,6 +31,8 @@ final class ConversionModel: ObservableObject {
     @Published private(set) var targets: [FileFormat] = []
 
     private let service: ConversionService
+    @Published private(set) var notice: String?
+
     private var itemTargets: [UUID: [FileFormat]] = [:]
     private var task: Task<[Result<ConversionResult, Error>], Never>?
 
@@ -58,6 +60,16 @@ final class ConversionModel: ObservableObject {
             }
         }
         refreshTargets()
+    }
+
+    /// Adds the result of a drop. A drop with no file URLs leaves a notice that the next successful add clears.
+    func addDropped(_ urls: [URL]) {
+        guard !urls.isEmpty else {
+            notice = "Only files and folders can be added"
+            return
+        }
+        notice = nil
+        add(urls)
     }
 
     func clear() {

@@ -15,6 +15,9 @@ public struct FileFormat: Hashable, Sendable {
         self.category = category
     }
 
+    /// Whether `ConversionOptions.quality` changes the encoded output for this target.
+    public var supportsQuality: Bool { category == .image && (id == "jpeg" || id == "heic") }
+
     public static let known: [FileFormat] = [
         FileFormat(id: "png", extensions: ["png"], category: .image),
         FileFormat(id: "jpeg", extensions: ["jpg", "jpeg"], category: .image),

@@ -18,3 +18,16 @@ jobs:
         run: brew install pandoc ffmpeg
       - name: Test
         run: swift test
+
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Install tools
+        run: brew install xcodegen pandoc ffmpeg
+      - name: Build app
+        run: bash scripts/build-app.sh
+      - name: Test app
+        run: bash scripts/test-app.sh

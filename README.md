@@ -33,6 +33,37 @@ Options for `convert`:
 | `--strip-metadata` | Remove metadata (such as EXIF) from the output |
 | `--force` | Overwrite an existing output file |
 
+## App (menu-bar)
+
+Wedge also ships as a macOS menu-bar app. It lives in the menu bar and has no Dock icon. Open it from the menu-bar icon with Open Shelf.
+
+The shelf is a floating window for converting files without the command line:
+
+- Drop files onto it, or choose Add Files...
+- Pick the target format. Only formats available for every file on the shelf are offered.
+- Set options if you need them: output folder, image quality, maximum dimension, strip metadata.
+- Choose Convert. Each file shows its progress, and Reveal in Finder opens the converted files.
+
+The app never overwrites an existing file unless "Replace existing files" is turned on.
+
+Settings lets you choose the default format, the output folder (next to the originals by default) and whether Wedge opens when you log in. The Tools submenu in the menu-bar menu shows whether `pandoc` and `ffmpeg` are found.
+
+To build and run it from source you need full Xcode (not only the Command Line Tools) and XcodeGen:
+
+```sh
+brew install xcodegen
+bash scripts/build-app.sh
+open build/DerivedData/Build/Products/Debug/Wedge.app
+```
+
+To run the app's tests:
+
+```sh
+bash scripts/test-app.sh
+```
+
+The app is ad-hoc signed and is not yet distributed through Homebrew; a cask will come later. The radial Action Wheel is planned and not yet available.
+
 ## Converters
 
 | Category | Engine | Notes |
@@ -61,6 +92,8 @@ brew install pandoc ffmpeg
 swift build
 ./scripts/test.sh
 ```
+
+This builds the command-line tool. The menu-bar app is built separately; see App (menu-bar).
 
 ## License
 

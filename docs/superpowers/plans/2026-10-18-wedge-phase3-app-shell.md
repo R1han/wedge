@@ -75,10 +75,10 @@
 ## Task 6: CI app-build check + docs
 **Files:** Modify `.github/workflows/ci.yml` (add an app-build job), `README.md` (document the app).
 **Interfaces:** CI job on macos-15: `brew install xcodegen`, `xcodegen generate`, `xcodebuild -scheme Wedge -destination 'platform=macOS' build` (keep the existing swift test job). README gains an "App (menu-bar)" section. (Cask distribution deferred to the end of Phase 4.)
-- [ ] Step 1: Add the CI job; validate YAML parses.
-- [ ] Step 2: Update README; clean-room name check empty.
-- [ ] Step 3: `bash scripts/build-app.sh` + `./scripts/test.sh` green locally.
-- [ ] Step 4: Commit `chore: CI app build check and app docs`.
+- [x] Step 1: Add the CI job; validate YAML parses.
+- [x] Step 2: Update README; clean-room name check empty.
+- [x] Step 3: `bash scripts/build-app.sh` + `./scripts/test.sh` green locally.
+- [x] Step 4: Commit `chore: CI app build check and app docs`.
 
 ---
 
